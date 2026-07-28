@@ -45,7 +45,7 @@ class ApplicationServiceTest {
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
         agreementDocuments = mock(AgreementDocumentComposer.class);
-        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator);
+        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator, agreementDocuments);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
     }
 
@@ -73,10 +73,10 @@ class ApplicationServiceTest {
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
 
+        // Not declined (no consents block yet), so the placeholder agreement PDF is generated —
+        // but nothing is reported to the orchestrator; that happens only on decline or failure.
         verify(agreementDocuments).compose("SIM-01");
-
-        verify(orchestrator).applicationStatusUpdate("SIM-01", Decision.ACCEPTED,
-                "hello world from processApplication");
+        verifyNoInteractions(orchestrator);
     }
 
     @Test

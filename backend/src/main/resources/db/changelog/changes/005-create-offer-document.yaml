@@ -7,7 +7,7 @@
 # NEVER EDIT THIS FILE once it has run — add a new change set instead (see 001's header).
 databaseChangeLog:
   - changeSet:
-      id: 002-create-offer-document
+      id: 005-create-offer-document
       author: neo-06
       changes:
         - createTable:

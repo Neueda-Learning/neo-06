@@ -23,7 +23,8 @@ public class GlobalExceptionHandler {
 
     /**
      * A lookup that found nothing — UC02's {@code GET /cases/{applicationId}} for an unknown id
-     * (AC7: {@code 404} with a JSON error body, never a {@code 500}).
+     * (AC7: {@code 404} with a JSON error body, never a {@code 500}), and equally UC05's
+     * {@code GET /cases/{id}/document} for an id nothing was ever generated for.
      */
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
@@ -57,15 +58,6 @@ public class GlobalExceptionHandler {
         int newline = message == null ? -1 : message.indexOf('\n');
         return error(HttpStatus.BAD_REQUEST,
                 "malformed request body: " + (newline > 0 ? message.substring(0, newline) : message));
-    }
-
-    /**
-     * A lookup found nothing — e.g. {@code GET /cases/{id}/document} for an id this module has no
-     * case for. Thrown by service code, never by Spring itself, so the message is always ours.
-     */
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
-        return error(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {

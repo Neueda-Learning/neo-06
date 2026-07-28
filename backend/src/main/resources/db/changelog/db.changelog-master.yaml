@@ -10,4 +10,5 @@ databaseChangeLog:
       file: db/changelog/changes/003-create-agreement-status-history.yaml
   - include:
       file: db/changelog/changes/004-drop-demo-showcase.yaml
-      file: db/changelog/changes/002-create-offer-document.yaml
+  - include:
+      file: db/changelog/changes/005-create-offer-document.yaml

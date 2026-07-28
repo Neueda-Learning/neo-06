@@ -20,10 +20,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>Deciding anything beyond the consent gate (generating the PDF, registering the e-sign
- * envelope, moving {@code GENERATING → PENDING}, the happy-path callback) is the decision engine —
- * a later use case, and explicitly out of scope for this one (see the UC 00 brief's "Out of
- * scope"). What belongs here is exactly what the brief's acceptance criteria ask for:</p>
+ * <p>Deciding anything beyond the consent gate (registering the e-sign envelope, moving
+ * {@code GENERATING → PENDING}, the happy-path callback, and the real numbers an
+ * {@code AgreementConfig} would produce) is the decision engine — a later use case, and
+ * explicitly out of scope for this one (see the UC 00 brief's "Out of scope"). UC05's placeholder
+ * agreement PDF is generated here too (via {@link AgreementDocumentComposer}), because it has
+ * nothing left to wait for once the consent gate has passed. What belongs here is exactly what
+ * the brief's acceptance criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -51,7 +54,9 @@ public class ApplicationService {
     private final AgreementDocumentComposer agreementDocuments;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
-                              OrchestratorClient orchestrator) {
+                              AgreementRecordRepository agreementRecords,
+                              OrchestratorClient orchestrator,
+                              AgreementDocumentComposer agreementDocuments) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
         this.orchestrator = orchestrator;
@@ -116,22 +121,30 @@ public class ApplicationService {
      * decision starts only after the row is committed" is the whole point of splitting the two
      * methods.</p>
      *
-     * <p>Only the consent gate is decided here (see class javadoc). Everything else the happy
-     * path needs — PDF generation, envelope registration, the {@code GENERATING → PENDING} move,
-     * and the callback that goes with it — is left for the decision engine use case; the row
-     * simply stays {@code GENERATING} until that lands.</p>
+     * <p>Only the consent gate is decided here (see class javadoc): {@code termsAccepted} false
+     * moves the row to {@link AgreementStatus#DECLINED} and reports {@code REJECTED} — nothing
+     * is generated for a case that never gets one. Otherwise (accepted, or not yet gated) this
+     * hands off to {@link AgreementDocumentComposer} for UC05's placeholder agreement PDF; the
+     * REAL numbers (envelope registration, the {@code GENERATING → PENDING} move, and the
+     * callback that goes with it) are still the decision engine use case's job, and the row stays
+     * {@code GENERATING} until that lands.</p>
      */
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
         try {
-            // 1 — say something. summary() is the one line every module logs on receipt.
-            log.info("Hello world from processApplication — {}", request.summary());
+            Application.Consents consents = request.application().consents();
+            Boolean termsAccepted = consents == null ? null : consents.termsAccepted();
 
-            // 2 — store something. ⚠️ demo_showcase is a placeholder; see DemoShowcase.
+            if (Boolean.FALSE.equals(termsAccepted)) {
+                updateStatus(applicationId, AgreementStatus.DECLINED);
+                orchestrator.applicationStatusUpdate(applicationId, Decision.REJECTED,
+                        "consent not given: termsAccepted=false");
+                return;
+            }
 
-            // 3 — report something. Always ACCEPTED until you write rules.
-            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
-                    "hello world from processApplication");
+            // Accepted, or not yet gated: nothing else for THIS use case to decide, but the
+            // agreement document is generated now so UC05's GET has something to serve.
+            agreementDocuments.compose(applicationId);
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
             // nothing to explain it. Refer it to a human and say why.
