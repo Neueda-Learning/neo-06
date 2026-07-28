@@ -12,3 +12,8 @@ databaseChangeLog:
       file: db/changelog/changes/004-drop-demo-showcase.yaml
   - include:
       file: db/changelog/changes/005-create-offer-document.yaml
+      file: db/changelog/changes/003-drop-demo-showcase.yaml
+  - include:
+      file: db/changelog/changes/004-add-signature-event-columns.yaml
+  - include:
+      file: db/changelog/changes/005-create-agreement-status-history.yaml

@@ -1,0 +1,61 @@
+# UC 06 · Receive Signature Events — the timeline. One insert-only row per status transition,
+# including refused late events (a SIGNED/DECLINED that arrives after the case has already
+# EXPIRED still writes a REFUSED_LATE_EVENT row: refusals are audit too).
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
+databaseChangeLog:
+  - changeSet:
+      id: 005-create-agreement-status-history
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: agreement_status_history
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: from_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: to_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  # e.g. SIGNATURE_EVENT, EXPIRY_CLOCK, RESEND, OVERRIDE, REFUSED_LATE_EVENT.
+                  name: event
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  # the customer (via the signing page), the system clock, or a named operator.
+                  name: actor
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: occurred_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            indexName: idx_agreement_status_history_application_id
+            tableName: agreement_status_history
+            columns:
+              - column:
+                  name: application_id
+      rollback:
+        - dropTable:
+            tableName: agreement_status_history

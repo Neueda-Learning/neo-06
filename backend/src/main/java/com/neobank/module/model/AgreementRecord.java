@@ -86,6 +86,22 @@ public class AgreementRecord {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * The CURRENT envelope registered with the e-sign mock, e.g. {@code env-8f14e45f} — added by
+     * UC 06 (Receive Signature Events). Null until the decision engine (UC 05, not yet built)
+     * sends the case for signature; a resend rotates it, and the old envelope's late events are
+     * refused by {@code SignatureEventService}'s guard.
+     */
+    @Column(name = "envelope_id", length = 64)
+    private String envelopeId;
+
+    /**
+     * When the customer's {@code SIGNED} event landed — carried in callback 2's detail; null
+     * unless signed. Added by UC 06.
+     */
+    @Column(name = "signed_at")
+    private Instant signedAt;
+
     protected AgreementRecord() {
         // JPA
     }
@@ -131,6 +147,17 @@ public class AgreementRecord {
     /** The only mutation UC 00 performs post-insert: the consent-gate move to DECLINED. */
     public void changeStatus(AgreementStatus newStatus) {
         this.status = newStatus;
+    }
+
+    /**
+     * UC 06's SIGNED transition: the status moves to {@link AgreementStatus#SIGNED} and
+     * {@code signedAt} is stamped with the event's own {@code occurredAt} — not
+     * {@code Instant.now()} — so the record carries when the customer actually signed, not when
+     * this module happened to process it.
+     */
+    public void sign(Instant occurredAt) {
+        this.status = AgreementStatus.SIGNED;
+        this.signedAt = occurredAt;
     }
 
     public String getApplicationId() {
@@ -183,5 +210,13 @@ public class AgreementRecord {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getEnvelopeId() {
+        return envelopeId;
+    }
+
+    public Instant getSignedAt() {
+        return signedAt;
     }
 }
