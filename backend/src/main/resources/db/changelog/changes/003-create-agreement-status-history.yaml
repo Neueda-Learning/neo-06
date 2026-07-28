@@ -1,0 +1,61 @@
+# UC 02 · Review Agreement's timeline — one insert-only row per status transition.
+#
+# Nothing in this module yet writes these rows (the lifecycle transitions are a later use case's
+# job); this table exists so UC 02's GET can read a real timeline and so tests can seed fixtures
+# against it. See module-06-agreement-management-docs/uc-02-review-agreement.md.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
+databaseChangeLog:
+  - changeSet:
+      id: 003-create-agreement-status-history
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: agreement_status_history
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: from_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: to_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: event
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: actor
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: occurred_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: agreement_status_history
+            indexName: idx_agreement_status_history_application
+            columns:
+              - column:
+                  name: application_id
+      rollback:
+        - dropTable:
+            tableName: agreement_status_history

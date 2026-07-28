@@ -3,6 +3,7 @@ package com.neobank.module.controller;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -15,17 +16,19 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * predictable body instead of a stack trace — {@code server.error.include-*=never} in
  * {@code application.yml} makes sure nothing leaks past this class.
  *
- * <p>Add a handler per exception your own code throws. A lookup that finds nothing, for example:</p>
- *
- * <pre>{@code
- * @ExceptionHandler(NoSuchElementException.class)
- * public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
- *     return error(HttpStatus.NOT_FOUND, ex.getMessage());
- * }
- * }</pre>
+ * <p>Add a handler per exception your own code throws.</p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * A lookup that found nothing — UC02's {@code GET /cases/{applicationId}} for an unknown id
+     * (AC7: {@code 404} with a JSON error body, never a {@code 500}).
+     */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
 
     /**
      * A field failed validation — in practice, an envelope with no {@code applicationId}. The

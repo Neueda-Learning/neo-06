@@ -74,7 +74,7 @@ class ModuleApplicationTests {
 
     @Test
     void contextLoads() {
-        // Reaching here means Liquibase created demo_showcase and ddl-auto=validate accepted it.
+        // Reaching here means Liquibase created agreement_record and ddl-auto=validate accepted it.
     }
 
     @Test
@@ -110,12 +110,14 @@ class ModuleApplicationTests {
                 .andExpect(jsonPath("$.serviceId").value("neo06"))
                 .andExpect(jsonPath("$.command").value("process-application"));
 
-        // The row the placeholder writes. Filtered by id, not counted: H2 is shared across the
-        // tests in this context, so a size assertion would depend on execution order.
+        // The AgreementRecord row UC00 writes. Filtered by id, not counted: H2 is shared across
+        // the tests in this context, so a size assertion would depend on execution order. Status
+        // stays GENERATING — deciding is out of scope for UC00; ACCEPTED is only what gets
+        // reported to the orchestrator, not what this row's own status becomes.
         mvc.perform(get("/api/v1/applications"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].status")
-                        .value(org.hamcrest.Matchers.hasItem("ACCEPTED")))
+                        .value(org.hamcrest.Matchers.hasItem("GENERATING")))
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].createdAt")
                         .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.notNullValue())));
     }
