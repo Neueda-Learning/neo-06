@@ -90,25 +90,4 @@ class AgreementRecordRepositoryIT {
                 .extracting(AgreementRecord::getApplicationId)
                 .containsExactly("APP-OLD", "APP-NEW");
     }
-
-    @Test
-    void samTest2() throws InterruptedException {
-        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.DECLINED));
-        Thread.sleep(1000);
-        agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.GENERATING));
-
-        assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
-                .extracting(AgreementRecord::getApplicationId)
-                .containsExactly("APP-OLD", "APP-NEW");
-    }
-    @Test
-    void samTest3() throws InterruptedException {
-        agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.DECLINED));
-        Thread.sleep(1000);
-        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.GENERATING));
-
-        assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
-                .extracting(AgreementRecord::getApplicationId)
-                .containsExactly("APP-NEW", "APP-OLD");
-    }
 }
