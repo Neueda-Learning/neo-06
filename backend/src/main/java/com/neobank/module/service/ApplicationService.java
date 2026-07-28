@@ -147,9 +147,16 @@ public class ApplicationService {
         }
     }
 
-    @Transactional
+    // Deliberately not relying on @Transactional + dirty-checking here: decide() calls this via
+    // self-invocation (this.updateStatus(...)), which bypasses Spring's proxy entirely, so an
+    // @Transactional on this method would do nothing — the record would be loaded, mutated, and
+    // then simply discarded, detached, with the change never flushed. An explicit save() goes
+    // through the repository's own (proxied) transaction and persists regardless of the caller.
     void updateStatus(String applicationId, AgreementStatus status) {
-        agreementRecords.findById(applicationId).ifPresent(record -> record.changeStatus(status));
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.changeStatus(status);
+            agreementRecords.save(record);
+        });
     }
 
     /** Everything this module holds, newest first — what its own UI reads until UC 01 replaces it. */

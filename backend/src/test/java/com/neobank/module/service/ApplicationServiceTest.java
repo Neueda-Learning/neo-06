@@ -106,6 +106,10 @@ class ApplicationServiceTest {
         service.decide(request("SIM-03", false));
 
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.DECLINED);
+        // Regression guard: updateStatus's @Transactional does nothing on a self-invoked call
+        // (bypasses Spring's proxy), so the mutation must be persisted with an explicit save() —
+        // a mock can't catch a missing flush the way the real database did.
+        verify(agreementRecords).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-03"), eq(Decision.REJECTED), any());
     }
 
