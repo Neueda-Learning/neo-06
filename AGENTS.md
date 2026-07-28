@@ -24,8 +24,6 @@ on.
 
 Owned by `neo-00/api-contract.md`. Do not change, in either direction:
 
-- `POST /api/v1/applications` answers **`202`** with
-  `{status:"in-progress", applicationId, serviceId, command}`.
 - The outcome goes back as `PUT /api/v1/applications/{applicationId}` with exactly three
   fields: `{serviceId, status, comment}`. The id is in the path, so it is not in the body.
 - `status` is one of `ACCEPTED` · `REJECTED` · `REFERRED`, uppercase.
