@@ -73,8 +73,39 @@ class AgreementRecordRepositoryIT {
 
     @Test
     void theBoardOrdersNewestFirst() {
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.DECLINED));
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.GENERATING));
+
+        assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
+                .extracting(AgreementRecord::getApplicationId)
+                .containsExactly("APP-OLD", "APP-NEW");
+    }
+
+    @Test
+    void samTest1() {
         agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.GENERATING));
         agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.DECLINED));
+
+        assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
+                .extracting(AgreementRecord::getApplicationId)
+                .containsExactly("APP-OLD", "APP-NEW");
+    }
+
+    @Test
+    void samTest2() throws InterruptedException {
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.DECLINED));
+        Thread.sleep(1000);
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.GENERATING));
+
+        assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
+                .extracting(AgreementRecord::getApplicationId)
+                .containsExactly("APP-OLD", "APP-NEW");
+    }
+    @Test
+    void samTest3() throws InterruptedException {
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.DECLINED));
+        Thread.sleep(1000);
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.GENERATING));
 
         assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
                 .extracting(AgreementRecord::getApplicationId)
