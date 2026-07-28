@@ -73,10 +73,10 @@ class ApplicationServiceTest {
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
 
-        // Not declined (no consents block yet), so the placeholder agreement PDF is generated —
-        // but nothing is reported to the orchestrator; that happens only on decline or failure.
+        // Not declined (no consents block yet), so the placeholder agreement PDF is generated,
+        // the case moves toward PENDING, and the orchestrator is told ACCEPTED.
         verify(agreementDocuments).compose("SIM-01");
-        verifyNoInteractions(orchestrator);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.ACCEPTED), any());
     }
 
     @Test
@@ -121,20 +121,30 @@ class ApplicationServiceTest {
     }
 
     @Test
-    void consentAcceptedLeavesTheRowGeneratingAndReportsNothingYet() {
-        // The happy path (PDF, envelope, PENDING) is the decision engine's job, not UC 00's —
-        // so accepted consent has nothing more to do here yet.
+    void consentAcceptedGeneratesTheDocumentMovesToPendingAndReportsAccepted() {
+        AgreementRecord row = new AgreementRecord("SIM-04", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-04")).thenReturn(Optional.of(row));
+
         service.decide(request("SIM-04", true));
 
-        verifyNoInteractions(orchestrator);
-        verify(agreementRecords, never()).findById(any());
+        verify(agreementDocuments).compose("SIM-04");
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        verify(agreementRecords).save(row);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
     }
 
     @Test
-    void aMissingConsentsBlockIsTreatedAsNotYetGated() {
+    void aMissingConsentsBlockIsTreatedTheSameAsAcceptedForNow() {
+        // No consents block yet (not the same as an explicit decline): treated like accepted —
+        // the document is generated and the case moves to PENDING.
+        AgreementRecord row = new AgreementRecord("SIM-05", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-05")).thenReturn(Optional.of(row));
+
         service.decide(request("SIM-05", null));
 
-        verifyNoInteractions(orchestrator);
+        verify(agreementDocuments).compose("SIM-05");
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.ACCEPTED), any());
     }
 
     @Test

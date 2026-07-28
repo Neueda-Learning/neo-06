@@ -110,13 +110,14 @@ class ModuleApplicationTests {
                 .andExpect(jsonPath("$.serviceId").value("neo06"))
                 .andExpect(jsonPath("$.command").value("process-application"));
 
-        // The row UC 00 writes: one AgreementRecord, GENERATING, before the consent-accepted
-        // happy path has a decision engine to advance it. Filtered by id, not counted: H2 is
-        // shared across the tests in this context, so a size assertion would depend on order.
+        // The row UC 00 writes: one AgreementRecord, moved on to PENDING once the consent-accepted
+        // happy path has generated the agreement document and reported ACCEPTED. Filtered by id,
+        // not counted: H2 is shared across the tests in this context, so a size assertion would
+        // depend on order.
         mvc.perform(get("/api/v1/applications"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].status")
-                        .value(org.hamcrest.Matchers.hasItem("GENERATING")))
+                        .value(org.hamcrest.Matchers.hasItem("PENDING")))
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].createdAt")
                         .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.notNullValue())));
     }

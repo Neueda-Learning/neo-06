@@ -12,8 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code GET /cases/{id}/document} — UC05 Serve the Agreement Document, minimal first slice.
- * See {@code prompts/uc-05-prompt.md} and {@link AgreementDocumentService} for what is
- * intentionally hardcoded here and what growing this into the real use case still needs.
+ * {@code id} is always the caller's own {@code applicationId} — nothing here is hardcoded; see
+ * {@code prompts/uc-05-prompt.md} and {@link AgreementDocumentService} for what growing this
+ * into the real use case still needs (the consent-gate {@code 409}, per-status behaviour).
  */
 @RestController
 public class AgreementDocumentController {
