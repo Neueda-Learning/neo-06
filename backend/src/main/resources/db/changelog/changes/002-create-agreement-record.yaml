@@ -1,10 +1,10 @@
 # UC 00 · Process Application's real table — replaces the demo_showcase placeholder.
 #
-# Columns for every currently-implemented use case: applicationId (PK, the ONLY applicant-related
-# column this schema ever stores), status, the terms/limits fields UC 02 reads, and the timestamps
-# the lifecycle stamps as it moves the case along. See
-# module-06-agreement-management-docs/uc-00-process-application.md and uc-02-review-agreement.md's
-# suggested entity model for the full shape.
+# Only the columns UC 00 itself needs: applicationId (PK, the ONLY applicant-related column this
+# schema ever stores), status, and the two timestamps. Later use cases (review, document, queue,
+# signature events, override) each add their own columns in their own change set as they need
+# them — see module-06-agreement-management-docs/uc-00-process-application.md's suggested entity
+# model for the full shape this table grows into.
 #
 # NEVER EDIT THIS FILE once it has run — add a new change set instead (Liquibase checksums every
 # applied one; editing this is a crash-loop on any database that already applied it).
@@ -17,8 +17,7 @@ databaseChangeLog:
             tableName: agreement_record
             columns:
               - column:
-                  # The id from the request ENVELOPE, not from inside the application object —
-                  # the primary key itself, not a surrogate.
+                  # The id from the request ENVELOPE, not from inside the application object.
                   name: application_id
                   type: VARCHAR(64)
                   constraints:
@@ -33,33 +32,6 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
-                  name: reference
-                  type: VARCHAR(32)
-              - column:
-                  name: envelope_id
-                  type: VARCHAR(64)
-              - column:
-                  name: terms_version
-                  type: VARCHAR(32)
-              - column:
-                  name: approved_limit
-                  type: INT
-              - column:
-                  name: apr
-                  type: DECIMAL(5,2)
-              - column:
-                  name: min_payment_gbp
-                  type: INT
-              - column:
-                  name: sent_at
-                  type: TIMESTAMP
-              - column:
-                  name: expires_at
-                  type: TIMESTAMP
-              - column:
-                  name: signed_at
-                  type: TIMESTAMP
-              - column:
                   name: created_at
                   type: TIMESTAMP
                   defaultValueComputed: CURRENT_TIMESTAMP
@@ -71,12 +43,6 @@ databaseChangeLog:
                   defaultValueComputed: CURRENT_TIMESTAMP
                   constraints:
                     nullable: false
-        - createIndex:
-            tableName: agreement_record
-            indexName: idx_agreement_record_status
-            columns:
-              - column:
-                  name: status
       rollback:
         - dropTable:
             tableName: agreement_record

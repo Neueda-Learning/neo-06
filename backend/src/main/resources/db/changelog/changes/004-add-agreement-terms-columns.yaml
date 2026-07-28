@@ -1,0 +1,80 @@
+# The terms/limits columns UC 02 reads, plus the lifecycle timestamps and the status index.
+#
+# WHY THIS EXISTS AS ITS OWN CHANGE SET. These nine columns and the index were first added by
+# editing 002-create-agreement-record.yaml in place, and that is what broke every deploy:
+# Liquibase check-sums a change set once it has applied, so a database that already ran 002
+# crash-loops on "check sum ... was 9:de06879d but is now 9:b68e744a". A fresh database (the
+# Testcontainers one CI uses) has no history to disagree with, which is why the build stayed
+# green while dev could not start. 002 has been put back exactly as it applied, and the new
+# columns now live here, where they can run once on top of it.
+#
+# The end state is unchanged: agreement_record carries all thirteen columns and the status index
+# on an existing database and a brand-new one alike.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
+databaseChangeLog:
+  - changeSet:
+      id: 004-add-agreement-terms-columns
+      author: neo-06
+      changes:
+        - addColumn:
+            tableName: agreement_record
+            columns:
+              - column:
+                  name: reference
+                  type: VARCHAR(32)
+              - column:
+                  name: envelope_id
+                  type: VARCHAR(64)
+              - column:
+                  name: terms_version
+                  type: VARCHAR(32)
+              - column:
+                  name: approved_limit
+                  type: INT
+              - column:
+                  name: apr
+                  type: DECIMAL(5,2)
+              - column:
+                  name: min_payment_gbp
+                  type: INT
+              - column:
+                  name: sent_at
+                  type: TIMESTAMP
+              - column:
+                  name: expires_at
+                  type: TIMESTAMP
+              - column:
+                  name: signed_at
+                  type: TIMESTAMP
+        - createIndex:
+            tableName: agreement_record
+            indexName: idx_agreement_record_status
+            columns:
+              - column:
+                  name: status
+      rollback:
+        - dropIndex:
+            tableName: agreement_record
+            indexName: idx_agreement_record_status
+        - dropColumn:
+            tableName: agreement_record
+            columns:
+              - column:
+                  name: reference
+              - column:
+                  name: envelope_id
+              - column:
+                  name: terms_version
+              - column:
+                  name: approved_limit
+              - column:
+                  name: apr
+              - column:
+                  name: min_payment_gbp
+              - column:
+                  name: sent_at
+              - column:
+                  name: expires_at
+              - column:
+                  name: signed_at
