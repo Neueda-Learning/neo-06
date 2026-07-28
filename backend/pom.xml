@@ -80,6 +80,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- PDF generation for the agreement document (UC05, GET /cases/{id}/document) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <!-- Unit + web-slice tests run DB-free against in-memory H2 (no Docker for `mvn test`) -->
         <dependency>
             <groupId>com.h2database</groupId>

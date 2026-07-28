@@ -30,14 +30,16 @@ class ApplicationServiceTest {
 
     private DemoShowcaseRepository demoShowcase;
     private OrchestratorClient orchestrator;
+    private AgreementDocumentComposer agreementDocuments;
     private ApplicationService service;
 
     @BeforeEach
     void setUp() {
         demoShowcase = mock(DemoShowcaseRepository.class);
         orchestrator = mock(OrchestratorClient.class);
+        agreementDocuments = mock(AgreementDocumentComposer.class);
         // Runnable::run — the work happens inline, so there is nothing to wait for.
-        service = new ApplicationService(Runnable::run, demoShowcase, orchestrator);
+        service = new ApplicationService(Runnable::run, demoShowcase, orchestrator, agreementDocuments);
         when(demoShowcase.save(any(DemoShowcase.class))).thenAnswer(call -> call.getArgument(0));
     }
 
@@ -60,6 +62,8 @@ class ApplicationServiceTest {
         verify(demoShowcase).save(saved.capture());
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo("ACCEPTED");
+
+        verify(agreementDocuments).compose("SIM-01");
 
         verify(orchestrator).applicationStatusUpdate("SIM-01", Decision.ACCEPTED,
                 "hello world from processApplication");

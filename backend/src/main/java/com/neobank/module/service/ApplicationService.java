@@ -49,6 +49,7 @@ public class ApplicationService {
     private final Executor executor;
     private final DemoShowcaseRepository demoShowcase;
     private final OrchestratorClient orchestrator;
+    private final AgreementDocumentComposer agreementDocuments;
 
     /**
      * {@code applicationTaskExecutor} is the thread pool Spring Boot configures for you. Tune it in
@@ -58,10 +59,12 @@ public class ApplicationService {
      */
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               DemoShowcaseRepository demoShowcase,
-                              OrchestratorClient orchestrator) {
+                              OrchestratorClient orchestrator,
+                              AgreementDocumentComposer agreementDocuments) {
         this.executor = executor;
         this.demoShowcase = demoShowcase;
         this.orchestrator = orchestrator;
+        this.agreementDocuments = agreementDocuments;
     }
 
     /**
@@ -96,6 +99,10 @@ public class ApplicationService {
 
             // 2 — store something. ⚠️ demo_showcase is a placeholder; see DemoShowcase.
             demoShowcase.save(new DemoShowcase(applicationId, Decision.ACCEPTED));
+
+            // 2b — generate this application's agreement PDF and store it once (UC05). The read
+            // side (GET /cases/{id}/document) never generates; it only ever selects this row.
+            agreementDocuments.compose(applicationId);
 
             // 3 — report something. Always ACCEPTED until you write rules.
             orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,

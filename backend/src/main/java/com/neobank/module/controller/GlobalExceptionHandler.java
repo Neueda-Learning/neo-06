@@ -3,6 +3,7 @@ package com.neobank.module.controller;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -54,6 +55,15 @@ public class GlobalExceptionHandler {
         int newline = message == null ? -1 : message.indexOf('\n');
         return error(HttpStatus.BAD_REQUEST,
                 "malformed request body: " + (newline > 0 ? message.substring(0, newline) : message));
+    }
+
+    /**
+     * A lookup found nothing — e.g. {@code GET /cases/{id}/document} for an id this module has no
+     * case for. Thrown by service code, never by Spring itself, so the message is always ours.
+     */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
