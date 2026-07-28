@@ -1,0 +1,36 @@
+# Nothing references demo_showcase any more (see 002-create-agreement-record.yaml and
+# AgreementRecord) — dropping it per the placeholder's own instructions in DemoShowcase.java.
+databaseChangeLog:
+  - changeSet:
+      id: 003-drop-demo-showcase
+      author: neo-06
+      changes:
+        - dropTable:
+            tableName: demo_showcase
+      rollback:
+        - createTable:
+            tableName: demo_showcase
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false

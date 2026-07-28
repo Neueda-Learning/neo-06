@@ -4,3 +4,7 @@
 databaseChangeLog:
   - include:
       file: db/changelog/changes/001-create-demo-showcase.yaml
+  - include:
+      file: db/changelog/changes/002-create-agreement-record.yaml
+  - include:
+      file: db/changelog/changes/003-drop-demo-showcase.yaml
