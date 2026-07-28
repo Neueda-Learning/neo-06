@@ -1,0 +1,48 @@
+# UC 00 · Process Application's real table — replaces the demo_showcase placeholder.
+#
+# Only the columns UC 00 itself needs: applicationId (PK, the ONLY applicant-related column this
+# schema ever stores), status, and the two timestamps. Later use cases (review, document, queue,
+# signature events, override) each add their own columns in their own change set as they need
+# them — see module-06-agreement-management-docs/uc-00-process-application.md's suggested entity
+# model for the full shape this table grows into.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead (Liquibase checksums every
+# applied one; editing this is a crash-loop on any database that already applied it).
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-agreement-record
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: agreement_record
+            columns:
+              - column:
+                  # The id from the request ENVELOPE, not from inside the application object.
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  # GENERATING | PENDING | SIGNED | DECLINED | EXPIRED — stored as text so the
+                  # database is readable. GENERATING is internal; UC 00 never reports it on the
+                  # orchestrator callback.
+                  name: status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+      rollback:
+        - dropTable:
+            tableName: agreement_record
