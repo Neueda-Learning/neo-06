@@ -105,6 +105,19 @@ public class AgreementRecord {
         this.status = status;
     }
 
+    /**
+     * A case already registered with the e-sign provider: an id, its status, and the envelope
+     * UC 06 matches incoming signature events against.
+     *
+     * <p>Mind the third argument — here it is the ENVELOPE id, while the eleven-argument
+     * constructor below takes {@code reference} in that position.
+     */
+    public AgreementRecord(String applicationId, AgreementStatus status, String envelopeId) {
+        this.applicationId = applicationId;
+        this.status = status;
+        this.envelopeId = envelopeId;
+    }
+
     /** The full shape a later use case (or a test fixture) populates once terms are pinned. */
     public AgreementRecord(String applicationId, AgreementStatus status, String reference,
                            String envelopeId, String termsVersion, Integer approvedLimit,
