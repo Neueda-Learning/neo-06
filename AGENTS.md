@@ -1,7 +1,7 @@
 # AGENTS.md — working in this repo
 
 This is one of ten identical services in the **neo-bank onboarding** capstone
-(superproject: [`neo-00`](https://github.com/gjavolce/neo-00)). Read this before
+(superproject: [`neo-00`](https://github.com/Neueda-Learning/neo-00)). Read this before
 changing anything.
 
 ## What this repo is for
@@ -24,8 +24,6 @@ on.
 
 Owned by `neo-00/api-contract.md`. Do not change, in either direction:
 
-- `POST /api/v1/applications` answers **`202`** with
-  `{status:"in-progress", applicationId, serviceId, command}`.
 - The outcome goes back as `PUT /api/v1/applications/{applicationId}` with exactly three
   fields: `{serviceId, status, comment}`. The id is in the path, so it is not in the body.
 - `status` is one of `ACCEPTED` · `REJECTED` · `REFERRED`, uppercase.
@@ -37,7 +35,7 @@ wrong, not the test.
 
 ## This service is deployed, not just run
 
-Pushing to `main` publishes `ghcr.io/gjavolce/neo-06-{backend,frontend}` and **this repo
+Pushing to `main` publishes `ghcr.io/neueda-learning/neo-06-{backend,frontend}` and **this repo
 deploys itself** to dev (`.github/workflows/pipeline.yml`, OIDC — no stored AWS keys); prod is a
 manual `promote` that ships the digest dev proved, behind a required reviewer. Feature branches
 only build and test. Three consequences worth holding on to:
@@ -97,7 +95,7 @@ nothing should: a UI button that POSTs `/api/v1/applications` is not the contrac
 short cut that would let a broken module look finished.
 
 Locally the caller is a **sidecar** — a mock orchestrator at `http://localhost:9000`, built by
-compose straight from [`gjavolce/neobank-sidecar`](https://github.com/gjavolce/neobank-sidecar)
+compose straight from [`Neueda-Learning/neobank-sidecar`](https://github.com/Neueda-Learning/neobank-sidecar)
 as a git build context. It sends the 26-application corpus to the real endpoint with the real
 envelope, and it serves `PUT /api/v1/applications/{id}` so the answer has somewhere to land. Rules:
 

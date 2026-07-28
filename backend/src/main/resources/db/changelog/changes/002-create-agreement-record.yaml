@@ -1,8 +1,8 @@
 # UC 00 · Process Application's real table — replaces the demo_showcase placeholder.
 #
-# Only the columns the currently-implemented use cases need: applicationId (PK, the ONLY
-# applicant-related column this schema ever stores), status, the terms/limits fields UC 02 reads,
-# and the timestamps the lifecycle stamps as it moves the case along. See
+# Columns for every currently-implemented use case: applicationId (PK, the ONLY applicant-related
+# column this schema ever stores), status, the terms/limits fields UC 02 reads, and the timestamps
+# the lifecycle stamps as it moves the case along. See
 # module-06-agreement-management-docs/uc-00-process-application.md and uc-02-review-agreement.md's
 # suggested entity model for the full shape.
 #
@@ -61,6 +61,12 @@ databaseChangeLog:
                   type: TIMESTAMP
               - column:
                   name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
                   type: TIMESTAMP
                   defaultValueComputed: CURRENT_TIMESTAMP
                   constraints:

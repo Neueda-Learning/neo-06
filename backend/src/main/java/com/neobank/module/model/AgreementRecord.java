@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -16,23 +17,24 @@ import java.time.Instant;
  *
  * <p>Written by UC00 (this module's {@code /execute} — see
  * {@code module-06-agreement-management-docs/uc-00-process-application.md}): exactly one row per
- * {@code applicationId}, committed <em>before</em> the {@code 202} is sent. Everything past
- * {@code applicationId} and {@code status} is {@code null} until a later use case fills it in
- * (generation, sending, signature) — the lifecycle transitions themselves are out of scope for
- * both UC00 and UC02 ("the /execute wiring", "editing an agreement... is UC 08").</p>
+ * {@code applicationId}, committed <em>before</em> the {@code 202} is sent. {@code applicationId}
+ * is the {@code @Id} itself — the envelope's id, never the copy inside {@code application} — and
+ * the ONLY applicant-related data this schema ever stores; the payload itself is never persisted,
+ * only handed to the off-thread worker.</p>
  *
- * <p><b>Idempotency = the unique key on {@code applicationId}.</b> It is the {@code @Id} directly
- * (not a surrogate long) — the journey key from the envelope, and the only applicant-related
- * column in this schema (see the doc's platform rule: "the payload is NEVER stored — only
- * {@code applicationId}").</p>
+ * <p>UC00 only ever writes {@link AgreementStatus#GENERATING} and, on the consent gate,
+ * {@link AgreementStatus#DECLINED} via {@link #changeStatus}. Everything past {@code status} —
+ * {@code reference}, {@code envelopeId}, {@code termsVersion}, the limits, the timestamps — stays
+ * {@code null} until a later use case (generation, sending, signature) fills it in; UC02 (Review
+ * Agreement) is what reads the full shape back — see that brief's suggested entity model.</p>
  */
 @Entity
 @Table(name = "agreement_record")
 public class AgreementRecord {
 
-    /** The journey key from the envelope — the only applicant-related column in this schema. */
+    /** The journey key from the envelope — unique, and the ONLY applicant-related column here. */
     @Id
-    @Column(name = "application_id", nullable = false, length = 64)
+    @Column(name = "application_id", length = 64, nullable = false, updatable = false)
     private String applicationId;
 
     /** GENERATING, PENDING, SIGNED, DECLINED or EXPIRED — GENERATING is internal. */
@@ -76,9 +78,13 @@ public class AgreementRecord {
     @Column(name = "signed_at")
     private Instant signedAt;
 
-    /** When this row was created — used only to order this module's own board, newest first. */
+    /** When the row was inserted — the hand-off point between the request thread and the worker. */
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    /** When the status last changed. */
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
 
     protected AgreementRecord() {
         // JPA
@@ -110,9 +116,21 @@ public class AgreementRecord {
 
     @PrePersist
     void onCreate() {
+        Instant now = Instant.now();
         if (createdAt == null) {
-            createdAt = Instant.now();
+            createdAt = now;
         }
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
+
+    /** The only mutation UC 00 performs post-insert: the consent-gate move to DECLINED. */
+    public void changeStatus(AgreementStatus newStatus) {
+        this.status = newStatus;
     }
 
     public String getApplicationId() {
@@ -161,5 +179,9 @@ public class AgreementRecord {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

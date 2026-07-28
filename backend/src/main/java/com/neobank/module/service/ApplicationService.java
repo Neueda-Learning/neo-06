@@ -1,6 +1,7 @@
 package com.neobank.module.service;
 
 import com.neobank.module.dto.AgreementRecordView;
+import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
 import com.neobank.module.model.AgreementRecord;
@@ -16,21 +17,28 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-// Note: createRecordIfAbsent is deliberately NOT annotated @Transactional at the method level.
-// Self-invocation (this.createRecordIfAbsent(...)) bypasses Spring's proxy, so that annotation
-// would do nothing anyway — the real transaction boundary is Spring Data JPA's own repository
-// proxy, which already wraps each existsById/save call. The TOCTOU window between the two calls
-// is closed by the unique primary key + the catch below, not by a wider transaction.
-
 /**
- * <h2>UC00 — Process Application: the durable hand-off between the request thread and the worker
- * that decides.</h2>
+ * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>The controller has already answered {@code 202} by the time this returns. Its whole job is to
- * make one thing true before that happens: exactly one {@link AgreementRecord}, keyed by
- * {@code applicationId}, committed to the database — see
- * {@code module-06-agreement-management-docs/uc-00-process-application.md} AC2. Everything after
- * that commit — deciding, generating, sending — is out of scope here and runs off-thread.</p>
+ * <p>Deciding anything beyond the consent gate (generating the PDF, registering the e-sign
+ * envelope, moving {@code GENERATING → PENDING}, the happy-path callback) is the decision engine —
+ * a later use case, and explicitly out of scope for this one (see the UC 00 brief's "Out of
+ * scope"). What belongs here is exactly what the brief's acceptance criteria ask for:</p>
+ *
+ * <ol>
+ *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
+ *       crash right after the ack loses nothing;</li>
+ *   <li>only {@code applicationId} is ever persisted from the envelope — the rest of
+ *       {@code request.application()} is handed to the worker and never stored;</li>
+ *   <li>a repeated {@code /execute} for the same id is idempotent — one row, no re-processing;</li>
+ *   <li>the one decision this use case's own field table assigns to it — the consent gate
+ *       ({@code consents.termsAccepted} false → {@code DECLINED}, nothing generated, nothing
+ *       sent) — runs off-thread, after the row is committed.</li>
+ * </ol>
+ *
+ * <p>UC02 (Review Agreement) reads the fuller shape ({@code reference}, {@code termsVersion}, the
+ * limits, the timeline) back out — this service never populates those columns; only a later
+ * decision-engine use case does.</p>
  */
 @Service
 public class ApplicationService {
@@ -41,12 +49,6 @@ public class ApplicationService {
     private final AgreementRecordRepository agreementRecords;
     private final OrchestratorClient orchestrator;
 
-    /**
-     * {@code applicationTaskExecutor} is the thread pool Spring Boot configures for you. Tune it in
-     * {@code application.yml} under {@code spring.task.execution.*} — pool size matters once your
-     * logic calls a slow mock, because that is what limits how many applications you can handle at
-     * once.
-     */
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               AgreementRecordRepository agreementRecords,
                               OrchestratorClient orchestrator) {
@@ -56,42 +58,47 @@ public class ApplicationService {
     }
 
     /**
-     * The hand-off point (AC2, AC6): commit the case row on the request thread — fast, local, no
-     * external call — and only then hand the rest of the work to the pool.
+     * The hand-off point. Insert the row on THIS (request) thread — it is one small write, not
+     * "rule or provider work" — then return so the controller can send the {@code 202}; the
+     * decision itself moves to the worker pool.
      *
-     * <p><b>Idempotent (AC4).</b> A repeat {@code /execute} for an {@code applicationId} that
-     * already has a row is a no-op: no second row, no second dispatch. The controller still answers
-     * {@code 202} either way — see {@code ApplicationController}.</p>
+     * <p><b>Nothing after the row is saved may block the caller.</b> The orchestrator is holding a
+     * connection open; only the insert happens inline, everything else runs on
+     * {@code applicationTaskExecutor}.</p>
      */
     public void processApplicationAsync(ApplicationRequest request) {
         String applicationId = request.applicationId();
-        if (!createRecordIfAbsent(applicationId)) {
-            log.info("Duplicate /execute for {} — already recorded, not reprocessing", applicationId);
+        log.info("RECEIVED {}", request.summary());
+
+        if (!ensureAgreementRecord(applicationId)) {
+            // Idempotent replay: the row already exists (first call, a retry, or a duplicate
+            // delivery), so there is nothing new to do — no second row, no second decision.
+            log.info("DUPLICATE /execute for {} — one row already exists, not reprocessing",
+                    applicationId);
             return;
         }
-        executor.execute(() -> processApplication(request));
+
+        executor.execute(() -> decide(request));
     }
 
     /**
-     * Insert the {@code GENERATING} row unless one already exists, atomically.
+     * Insert exactly one {@link AgreementRecord}, keyed by {@code applicationId}, in
+     * {@link AgreementStatus#GENERATING}. Returns {@code false} without throwing when the row
+     * already exists — same request twice, same result once.
      *
-     * <p>{@code existsById} is the fast path; the {@code save} is guarded against a concurrent
-     * duplicate too, because two {@code /execute} calls for the same {@code applicationId} can race
-     * past the {@code existsById} check on different threads. Either way, the unique primary key is
-     * the real guarantee, not a Java one — this method only decides who gets to run the async work.
-     *
-     * @return {@code true} if this call created the row (and therefore should dispatch the async
-     *         worker), {@code false} if the row already existed.
+     * <p>A save-then-catch, not a check-then-save: two concurrent {@code /execute} calls for the
+     * same id can both pass an {@code existsById} check before either commits, so the primary key
+     * itself is the source of truth and the unique-constraint violation is the expected,
+     * non-exceptional outcome of losing that race.</p>
      */
-    @Transactional
-    boolean createRecordIfAbsent(String applicationId) {
+    private boolean ensureAgreementRecord(String applicationId) {
         if (agreementRecords.existsById(applicationId)) {
             return false;
         }
         try {
             agreementRecords.save(new AgreementRecord(applicationId, AgreementStatus.GENERATING));
             return true;
-        } catch (DataIntegrityViolationException e) {
+        } catch (DataIntegrityViolationException raced) {
             // Lost the race to a concurrent /execute for the same applicationId — its insert won,
             // ours is the duplicate. One row either way.
             log.info("Concurrent /execute for {} — unique constraint caught the duplicate",
@@ -101,41 +108,51 @@ public class ApplicationService {
     }
 
     /**
-     * Do the (still placeholder) work: say something, and report something. Storing the row already
-     * happened in {@link #createRecordIfAbsent} before this was ever scheduled.
+     * The off-thread decision. Package-private so a unit test can call it directly on the test
+     * thread — no Spring, no executor needed to exercise the rule.
      *
-     * <p>Package-private on purpose — the outside world goes through
-     * {@link #processApplicationAsync}, and a unit test can call this directly on the test thread,
-     * which is what makes it testable without a thread pool.</p>
+     * <p>Runs only after {@link #processApplicationAsync} has committed the row — "the off-thread
+     * decision starts only after the row is committed" is the whole point of splitting the two
+     * methods.</p>
+     *
+     * <p>Only the consent gate is decided here (see class javadoc). Everything else the happy
+     * path needs — PDF generation, envelope registration, the {@code GENERATING → PENDING} move,
+     * and the callback that goes with it — is left for the decision engine use case; the row
+     * simply stays {@code GENERATING} until that lands.</p>
      */
-    void processApplication(ApplicationRequest request) {
+    void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
         try {
-            // 1 — say something. summary() is the one line every module logs on receipt.
-            log.info("Hello world from processApplication — {}", request.summary());
+            Application application = request.application();
+            Application.Consents consents = application == null ? null : application.consents();
+            Boolean termsAccepted = consents == null ? null : consents.termsAccepted();
 
-            // Confirms the hand-off: the row this method relies on already exists, committed by
-            // the request thread. A missing row here is a bug in createRecordIfAbsent, not in the
-            // caller.
-            agreementRecords.findById(applicationId)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "no AgreementRecord row for " + applicationId));
+            if (Boolean.FALSE.equals(termsAccepted)) {
+                updateStatus(applicationId, AgreementStatus.DECLINED);
+                orchestrator.applicationStatusUpdate(applicationId, Decision.REJECTED,
+                        "consent not accepted — no agreement generated");
+                return;
+            }
 
-            // 2 — report something. Always ACCEPTED until a later use case writes the real rules
-            // (deciding is explicitly out of scope for UC00).
-            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
-                    "hello world from processApplication");
+            // Consent gate passed (or the field was absent — nothing to gate on yet). The
+            // decision engine (PDF + envelope + PENDING + its callback) is out of scope for UC 00.
+            log.info("GENERATING {} — awaiting the decision engine (not yet implemented)",
+                    applicationId);
         } catch (RuntimeException e) {
-            // A module that throws never reports, and the orchestrator then waits out its 30s
-            // timeout and ends the journey FAILED with nothing to explain it. So: refer it to a
-            // human and say why. Keep this guard when you replace the body above.
-            log.error("processApplication failed for {} — referring", applicationId, e);
+            // A module that throws never reports, and the orchestrator waits out its timeout with
+            // nothing to explain it. Refer it to a human and say why.
+            log.error("decide failed for {} — referring", applicationId, e);
             orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
                     "module error: " + e);
         }
     }
 
-    /** Everything this module has answered, newest first — what its own UI reads (AC7). */
+    @Transactional
+    void updateStatus(String applicationId, AgreementStatus status) {
+        agreementRecords.findById(applicationId).ifPresent(record -> record.changeStatus(status));
+    }
+
+    /** Everything this module holds, newest first — what its own UI reads until UC 01 replaces it. */
     @Transactional(readOnly = true)
     public List<AgreementRecordView> findAll() {
         return agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc().stream()

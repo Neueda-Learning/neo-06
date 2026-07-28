@@ -19,7 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *
  * <p>Testcontainers boots a real MySQL 8.4, this module's Liquibase change sets create
  * {@code agreement_record} on it, and Hibernate runs {@code ddl-auto=validate} against that real
- * DDL. It catches what H2 hides — {@code TIMESTAMP}/{@code DECIMAL} column behaviour — which is
+ * DDL. It catches what H2 hides — {@code TIMESTAMP}↔{@code Instant} and column widths — which is
  * exactly the class of bug that otherwise only appears on {@code docker compose up}.</p>
  *
  * <p>{@code disabledWithoutDocker = true}: with Docker stopped this is SKIPPED, not failed.</p>
@@ -50,11 +50,12 @@ class AgreementRecordRepositoryIT {
     }
 
     @Test
-    void aRowRoundTripsThroughRealMysql() {
+    void aRowRoundTripsThroughRealMysqlKeyedByApplicationId() {
         AgreementRecord saved = agreementRecords.saveAndFlush(
                 new AgreementRecord("APP-1", AgreementStatus.GENERATING));
 
-        assertThat(saved.getCreatedAt()).isNotNull(); // @PrePersist ran
+        assertThat(saved.getCreatedAt()).isNotNull();   // @PrePersist ran
+        assertThat(saved.getUpdatedAt()).isNotNull();
 
         AgreementRecord reloaded = agreementRecords.findById("APP-1").orElseThrow();
         assertThat(reloaded.getApplicationId()).isEqualTo("APP-1");
@@ -62,12 +63,20 @@ class AgreementRecordRepositoryIT {
     }
 
     @Test
+    void aSecondInsertForTheSameIdIsRejectedByThePrimaryKey() {
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-DUP", AgreementStatus.GENERATING));
+
+        assertThat(agreementRecords.existsById("APP-DUP")).isTrue();
+        // The service layer relies on exactly this: the primary key is the idempotency guarantee.
+    }
+
+    @Test
     void theBoardOrdersNewestFirst() {
+        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.DECLINED));
         agreementRecords.saveAndFlush(new AgreementRecord("APP-OLD", AgreementStatus.GENERATING));
-        agreementRecords.saveAndFlush(new AgreementRecord("APP-NEW", AgreementStatus.PENDING));
 
         assertThat(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
                 .extracting(AgreementRecord::getApplicationId)
-                .containsExactly("APP-NEW", "APP-OLD");
+                .containsExactly("APP-OLD", "APP-NEW");
     }
 }

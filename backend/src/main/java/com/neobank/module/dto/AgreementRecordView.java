@@ -7,8 +7,9 @@ import java.time.Instant;
  * What {@code GET /api/v1/applications} returns — this module's own board, not the orchestrator's.
  *
  * <p>Deliberately thin: the surrogate/entity details of {@link AgreementRecord} stay behind this
- * boundary, and the board only ever needs to know what case exists, what state it is in, and when
- * this module first saw it.</p>
+ * boundary. UC 01 (Search Cases) replaces this read path with its own {@code /cases} endpoint and
+ * a richer shape; this one stays only as long as {@code ApplicationController.list()} needs
+ * something to return.</p>
  */
 public record AgreementRecordView(
         String applicationId,
