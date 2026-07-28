@@ -46,7 +46,12 @@ public class AgreementRecord {
     @Column(length = 32)
     private String reference;
 
-    /** The CURRENT envelope registered with the e-sign mock. Null until sent. */
+    /**
+     * The CURRENT envelope registered with the e-sign mock, e.g. {@code env-8f14e45f}. Null until
+     * the decision engine (UC 05, not yet built) sends the case for signature; a resend rotates
+     * it, and the old envelope's late events are refused by {@code SignatureEventService}'s
+     * guard (UC 06).
+     */
     @Column(name = "envelope_id", length = 64)
     private String envelopeId;
 
@@ -74,7 +79,11 @@ public class AgreementRecord {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
-    /** When the customer's SIGNED event landed; null unless signed. */
+    /**
+     * When the customer's {@code SIGNED} event landed — carried in callback 2's detail; null
+     * unless signed. Stamped by {@link #sign(Instant)} (UC 06) with the event's own
+     * {@code occurredAt}, not processing time.
+     */
     @Column(name = "signed_at")
     private Instant signedAt;
 
@@ -85,22 +94,6 @@ public class AgreementRecord {
     /** When the status last changed. */
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
-
-    /**
-     * The CURRENT envelope registered with the e-sign mock, e.g. {@code env-8f14e45f} — added by
-     * UC 06 (Receive Signature Events). Null until the decision engine (UC 05, not yet built)
-     * sends the case for signature; a resend rotates it, and the old envelope's late events are
-     * refused by {@code SignatureEventService}'s guard.
-     */
-    @Column(name = "envelope_id", length = 64)
-    private String envelopeId;
-
-    /**
-     * When the customer's {@code SIGNED} event landed — carried in callback 2's detail; null
-     * unless signed. Added by UC 06.
-     */
-    @Column(name = "signed_at")
-    private Instant signedAt;
 
     protected AgreementRecord() {
         // JPA
@@ -210,13 +203,5 @@ public class AgreementRecord {
 
     public Instant getUpdatedAt() {
         return updatedAt;
-    }
-
-    public String getEnvelopeId() {
-        return envelopeId;
-    }
-
-    public Instant getSignedAt() {
-        return signedAt;
     }
 }
