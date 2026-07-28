@@ -3,6 +3,7 @@ package com.neobank.module.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,14 +22,15 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * UC 00's two halves, tested separately: {@link ApplicationService#processApplicationAsync} (the
  * durable row + idempotency + hand-off) and {@link ApplicationService#decide} (the one decision
  * this use case owns — the consent gate).
  *
- * <p>No Spring, no database, no HTTP — same style as the placeholder test it replaces: the
- * service takes a request and calls two collaborators, so each test is a handful of lines.</p>
+ * <p>No Spring, no database, no HTTP — the service takes a request and calls two collaborators, so
+ * each test is a handful of lines.</p>
  */
 class ApplicationServiceTest {
 
@@ -83,6 +85,20 @@ class ApplicationServiceTest {
     }
 
     @Test
+    void aRaceThatSlipsPastExistsByIdIsCaughtByTheUniqueKeyAndSkipsTheDecision() {
+        // Two /execute calls for the same id can both see existsById == false before either has
+        // committed. The primary key is the real guarantee; this proves the loser backs off rather
+        // than dispatching a second decision.
+        when(agreementRecords.existsById("SIM-07")).thenReturn(false);
+        doThrow(new DataIntegrityViolationException("duplicate key"))
+                .when(agreementRecords).save(any(AgreementRecord.class));
+
+        service.processApplicationAsync(request("SIM-07", null));
+
+        verifyNoInteractions(orchestrator);
+    }
+
+    @Test
     void consentGateFalseDeclinesTheCaseAndReportsRejected() {
         AgreementRecord row = new AgreementRecord("SIM-03", AgreementStatus.GENERATING);
         when(agreementRecords.findById("SIM-03")).thenReturn(Optional.of(row));
@@ -90,6 +106,10 @@ class ApplicationServiceTest {
         service.decide(request("SIM-03", false));
 
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.DECLINED);
+        // Regression guard: updateStatus's @Transactional does nothing on a self-invoked call
+        // (bypasses Spring's proxy), so the mutation must be persisted with an explicit save() —
+        // a mock can't catch a missing flush the way the real database did.
+        verify(agreementRecords).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-03"), eq(Decision.REJECTED), any());
     }
 

@@ -1,8 +1,9 @@
-# Nothing references demo_showcase any more (see 002-create-agreement-record.yaml and
-# AgreementRecord) — dropping it per the placeholder's own instructions in DemoShowcase.java.
+# demo_showcase is fully replaced by agreement_record (002) — nothing references it any more.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
 databaseChangeLog:
   - changeSet:
-      id: 003-drop-demo-showcase
+      id: 004-drop-demo-showcase
       author: neo-06
       changes:
         - dropTable:

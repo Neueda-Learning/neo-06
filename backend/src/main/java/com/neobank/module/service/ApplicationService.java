@@ -35,6 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
  *       ({@code consents.termsAccepted} false → {@code DECLINED}, nothing generated, nothing
  *       sent) — runs off-thread, after the row is committed.</li>
  * </ol>
+ *
+ * <p>UC02 (Review Agreement) reads the fuller shape ({@code reference}, {@code termsVersion}, the
+ * limits, the timeline) back out — this service never populates those columns; only a later
+ * decision-engine use case does.</p>
  */
 @Service
 public class ApplicationService {
@@ -95,6 +99,10 @@ public class ApplicationService {
             agreementRecords.save(new AgreementRecord(applicationId, AgreementStatus.GENERATING));
             return true;
         } catch (DataIntegrityViolationException raced) {
+            // Lost the race to a concurrent /execute for the same applicationId — its insert won,
+            // ours is the duplicate. One row either way.
+            log.info("Concurrent /execute for {} — unique constraint caught the duplicate",
+                    applicationId);
             return false;
         }
     }
@@ -139,9 +147,16 @@ public class ApplicationService {
         }
     }
 
-    @Transactional
+    // Deliberately not relying on @Transactional + dirty-checking here: decide() calls this via
+    // self-invocation (this.updateStatus(...)), which bypasses Spring's proxy entirely, so an
+    // @Transactional on this method would do nothing — the record would be loaded, mutated, and
+    // then simply discarded, detached, with the change never flushed. An explicit save() goes
+    // through the repository's own (proxied) transaction and persists regardless of the caller.
     void updateStatus(String applicationId, AgreementStatus status) {
-        agreementRecords.findById(applicationId).ifPresent(record -> record.changeStatus(status));
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.changeStatus(status);
+            agreementRecords.save(record);
+        });
     }
 
     /** Everything this module holds, newest first — what its own UI reads until UC 01 replaces it. */
