@@ -36,6 +36,7 @@ class ApplicationServiceTest {
 
     private AgreementRecordRepository agreementRecords;
     private OrchestratorClient orchestrator;
+    private AgreementDocumentComposer agreementDocuments;
     private ApplicationService service;
 
     @BeforeEach
@@ -43,6 +44,7 @@ class ApplicationServiceTest {
         agreementRecords = mock(AgreementRecordRepository.class);
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
+        agreementDocuments = mock(AgreementDocumentComposer.class);
         service = new ApplicationService(Runnable::run, agreementRecords, orchestrator);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
     }
@@ -70,6 +72,11 @@ class ApplicationServiceTest {
         verify(agreementRecords).save(saved.capture());
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
+
+        verify(agreementDocuments).compose("SIM-01");
+
+        verify(orchestrator).applicationStatusUpdate("SIM-01", Decision.ACCEPTED,
+                "hello world from processApplication");
     }
 
     @Test

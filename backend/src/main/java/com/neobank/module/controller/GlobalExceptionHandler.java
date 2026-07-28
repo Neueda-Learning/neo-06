@@ -59,6 +59,15 @@ public class GlobalExceptionHandler {
                 "malformed request body: " + (newline > 0 ? message.substring(0, newline) : message));
     }
 
+    /**
+     * A lookup found nothing — e.g. {@code GET /cases/{id}/document} for an id this module has no
+     * case for. Thrown by service code, never by Spring itself, so the message is always ours.
+     */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", Instant.now().toString());

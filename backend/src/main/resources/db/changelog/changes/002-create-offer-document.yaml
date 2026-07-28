@@ -1,0 +1,55 @@
+# offer_document — UC05, Serve the Agreement Document (prompts/uc-05-prompt.md).
+#
+# One row per application: the PDF generated once at execute-time, plus the fingerprint
+# (sha256, size_bytes) that proves the bytes served later are the bytes generated then.
+# generated_at and application_id are set at insert time and never updated afterwards.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead (see 001's header).
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-offer-document
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: offer_document
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  # The id from the request ENVELOPE — one document per application.
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_offer_document_application_id
+              - column:
+                  name: pdf_blob
+                  type: MEDIUMBLOB
+                  constraints:
+                    nullable: false
+              - column:
+                  # Lowercase hex SHA-256 of pdf_blob, computed once and never recomputed.
+                  name: sha256
+                  type: CHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: size_bytes
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: generated_at
+                  type: TIMESTAMP
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+      rollback:
+        - dropTable:
+            tableName: offer_document

@@ -48,13 +48,14 @@ public class ApplicationService {
     private final Executor executor;
     private final AgreementRecordRepository agreementRecords;
     private final OrchestratorClient orchestrator;
+    private final AgreementDocumentComposer agreementDocuments;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
-                              AgreementRecordRepository agreementRecords,
                               OrchestratorClient orchestrator) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
         this.orchestrator = orchestrator;
+        this.agreementDocuments = agreementDocuments;
     }
 
     /**
@@ -123,21 +124,14 @@ public class ApplicationService {
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
         try {
-            Application application = request.application();
-            Application.Consents consents = application == null ? null : application.consents();
-            Boolean termsAccepted = consents == null ? null : consents.termsAccepted();
+            // 1 — say something. summary() is the one line every module logs on receipt.
+            log.info("Hello world from processApplication — {}", request.summary());
 
-            if (Boolean.FALSE.equals(termsAccepted)) {
-                updateStatus(applicationId, AgreementStatus.DECLINED);
-                orchestrator.applicationStatusUpdate(applicationId, Decision.REJECTED,
-                        "consent not accepted — no agreement generated");
-                return;
-            }
+            // 2 — store something. ⚠️ demo_showcase is a placeholder; see DemoShowcase.
 
-            // Consent gate passed (or the field was absent — nothing to gate on yet). The
-            // decision engine (PDF + envelope + PENDING + its callback) is out of scope for UC 00.
-            log.info("GENERATING {} — awaiting the decision engine (not yet implemented)",
-                    applicationId);
+            // 3 — report something. Always ACCEPTED until you write rules.
+            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
+                    "hello world from processApplication");
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
             // nothing to explain it. Refer it to a human and say why.
