@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.neobank.module.integrations.orchestrator.Application;
+import com.neobank.module.integrations.orchestrator.OrchestratorApplicationClient;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.AgreementStatusHistory;
@@ -17,6 +19,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClientException;
 
 /**
  * UC02 — Review Agreement. No Spring, no database: the two repositories are mocked, so this pins
@@ -26,13 +29,15 @@ class CaseServiceTest {
 
     private AgreementRecordRepository agreementRecords;
     private AgreementStatusHistoryRepository history;
+    private OrchestratorApplicationClient orchestratorApplications;
     private CaseService service;
 
     @BeforeEach
     void setUp() {
         agreementRecords = mock(AgreementRecordRepository.class);
         history = mock(AgreementStatusHistoryRepository.class);
-        service = new CaseService(agreementRecords, history);
+        orchestratorApplications = mock(OrchestratorApplicationClient.class);
+        service = new CaseService(agreementRecords, history, orchestratorApplications);
     }
 
     @Test
@@ -110,5 +115,48 @@ class CaseServiceTest {
         when(history.findByApplicationIdOrderByOccurredAtAsc("app-9")).thenReturn(List.of());
 
         assertThat(service.getCase("app-9").termsVersion()).isEqualTo("2026-06-01");
+    }
+
+    // --- UC03 — View Applicant -------------------------------------------------------------
+
+    @Test
+    void mariasApplicantViewMatchesTheDocsCheckpoint() {
+        // AC2: app-1234 -> Maria Nowak / maria.nowak@example.com / CREDIT_CARD_REWARDS / terms accepted.
+        Application application = new Application(
+                "app-1234", "WEB", "2026-07-20T09:00:00Z",
+                new Application.Applicant("Maria Nowak", "1990-04-11", "maria.nowak@example.com",
+                        "+48123456789", "PL", "PL", List.of("PL"), "OWNER", null, 24, 0),
+                null, null, null,
+                new Application.Product("CREDIT_CARD_REWARDS", 2800),
+                null,
+                new Application.Consents(true, true, false));
+        when(orchestratorApplications.getApplication("app-1234")).thenReturn(application);
+
+        var view = service.getApplicant("app-1234");
+
+        assertThat(view.applicationId()).isEqualTo("app-1234");
+        assertThat(view.fullName()).isEqualTo("Maria Nowak");
+        assertThat(view.email()).isEqualTo("maria.nowak@example.com");
+        assertThat(view.productCode()).isEqualTo("CREDIT_CARD_REWARDS");
+        assertThat(view.termsAccepted()).isTrue();
+        assertThat(view.retryable()).isFalse();
+    }
+
+    @Test
+    void orchestratorUnreachableReturnsARetryableViewNeverAnException() {
+        // AC4: the sidebar degrades to retryable — the case detail, terms and timeline still
+        // render (a separate call, getCase), so this must never throw.
+        when(orchestratorApplications.getApplication("app-1234"))
+                .thenThrow(new RestClientException("connection refused"));
+
+        var view = service.getApplicant("app-1234");
+
+        assertThat(view.applicationId()).isEqualTo("app-1234");
+        assertThat(view.retryable()).isTrue();
+        assertThat(view.fullName()).isNull();
+        assertThat(view.email()).isNull();
+        assertThat(view.mobile()).isNull();
+        assertThat(view.productCode()).isNull();
+        assertThat(view.termsAccepted()).isNull();
     }
 }

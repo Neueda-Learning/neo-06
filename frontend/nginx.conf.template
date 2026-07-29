@@ -37,6 +37,16 @@ server {
     proxy_pass http://$api_backend:8080$uri$is_args$args;
   }
 
+  # This module's own read surface — GET /cases/{id} (UC02), GET /cases/{id}/applicant
+  # (UC03), and whatever UC01's board search adds — is NOT under /api/, so it needs its
+  # own prefix location or the regex SPA fallback below swallows it and the browser gets
+  # index.html back instead of JSON.
+  location ^~ ${BASE_PATH}/cases/ {
+    set $cases_backend ${BACKEND_HOST};
+    rewrite ^${BASE_PATH}(/cases/.*)$ $1 break;
+    proxy_pass http://$cases_backend:8080$uri$is_args$args;
+  }
+
   # Exact matches, so they also beat the regex below. The ALB target group health-checks
   # ${BASE_PATH}/health directly, bypassing its own routing rules — if this path and the
   # target group's HealthCheckPath ever disagree, every task is killed as unhealthy and
