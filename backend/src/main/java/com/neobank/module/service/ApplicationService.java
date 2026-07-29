@@ -1,13 +1,19 @@
 package com.neobank.module.service;
 
 import com.neobank.module.dto.AgreementRecordView;
+import com.neobank.module.dto.EsignConfigView;
 import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
+import com.neobank.module.model.AgreementConfig;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
+import com.neobank.module.model.AgreementStatusHistory;
 import com.neobank.module.model.Decision;
+import com.neobank.module.repository.AgreementConfigRepository;
 import com.neobank.module.repository.AgreementRecordRepository;
+import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
@@ -20,10 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>Deciding anything beyond the consent gate (generating the PDF, registering the e-sign
- * envelope, moving {@code GENERATING → PENDING}, the happy-path callback) is the decision engine —
- * a later use case, and explicitly out of scope for this one (see the UC 00 brief's "Out of
- * scope"). What belongs here is exactly what the brief's acceptance criteria ask for:</p>
+ * <p>Once the consent gate has passed: the case's terms are pinned from the current
+ * {@link AgreementConfig} (see {@link #pinTerms}), UC05's agreement PDF is generated (via
+ * {@link AgreementDocumentComposer}) with those terms printed on it, an envelope is registered
+ * with UC 07's e-sign provider (via {@link EsignProvider}), the row moves
+ * {@code GENERATING → PENDING} carrying that envelope and its expiry, and the orchestrator is told
+ * {@code ACCEPTED} so the journey advances. What belongs here is exactly what the brief's
+ * acceptance criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -37,24 +46,39 @@ import org.springframework.transaction.annotation.Transactional;
  * </ol>
  *
  * <p>UC02 (Review Agreement) reads the fuller shape ({@code reference}, {@code termsVersion}, the
- * limits, the timeline) back out — this service never populates those columns; only a later
- * decision-engine use case does.</p>
+ * limits, the timeline) back out — this service is what populates those columns, once, at
+ * generation.</p>
  */
 @Service
 public class ApplicationService {
 
     private static final Logger log = LoggerFactory.getLogger(ApplicationService.class);
 
+    /** Used only when no {@link AgreementConfig} row exists at all — should never happen outside a broken seed. */
+    private static final int DEFAULT_EXPIRY_DAYS = 5;
+
     private final Executor executor;
     private final AgreementRecordRepository agreementRecords;
+    private final AgreementConfigRepository agreementConfigs;
+    private final AgreementStatusHistoryRepository history;
     private final OrchestratorClient orchestrator;
+    private final AgreementDocumentComposer agreementDocuments;
+    private final EsignProvider esignProvider;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               AgreementRecordRepository agreementRecords,
-                              OrchestratorClient orchestrator) {
+                              AgreementConfigRepository agreementConfigs,
+                              AgreementStatusHistoryRepository history,
+                              OrchestratorClient orchestrator,
+                              AgreementDocumentComposer agreementDocuments,
+                              EsignProvider esignProvider) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
+        this.agreementConfigs = agreementConfigs;
+        this.history = history;
         this.orchestrator = orchestrator;
+        this.agreementDocuments = agreementDocuments;
+        this.esignProvider = esignProvider;
     }
 
     /**
@@ -115,29 +139,43 @@ public class ApplicationService {
      * decision starts only after the row is committed" is the whole point of splitting the two
      * methods.</p>
      *
-     * <p>Only the consent gate is decided here (see class javadoc). Everything else the happy
-     * path needs — PDF generation, envelope registration, the {@code GENERATING → PENDING} move,
-     * and the callback that goes with it — is left for the decision engine use case; the row
-     * simply stays {@code GENERATING} until that lands.</p>
+     * <p>Only the consent gate is decided here (see class javadoc): {@code termsAccepted} false
+     * moves the row to {@link AgreementStatus#DECLINED} and reports {@code REJECTED} — nothing
+     * is generated for a case that never gets one. Otherwise (accepted, or not yet gated) this
+     * pins the case's terms from the current {@link AgreementConfig}, generates UC05's agreement
+     * PDF with those terms printed on it, and hands off to {@link #sendForSignature} via UC 07's
+     * e-sign provider.</p>
      */
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
         try {
-            Application application = request.application();
-            Application.Consents consents = application == null ? null : application.consents();
+            Application.Consents consents = request.application().consents();
             Boolean termsAccepted = consents == null ? null : consents.termsAccepted();
 
             if (Boolean.FALSE.equals(termsAccepted)) {
                 updateStatus(applicationId, AgreementStatus.DECLINED);
+                history.save(new AgreementStatusHistory(applicationId, AgreementStatus.GENERATING,
+                        AgreementStatus.DECLINED, "CONSENT_GATE", "system", Instant.now()));
                 orchestrator.applicationStatusUpdate(applicationId, Decision.REJECTED,
-                        "consent not accepted — no agreement generated");
+                        "consent not given: termsAccepted=false");
                 return;
             }
 
-            // Consent gate passed (or the field was absent — nothing to gate on yet). The
-            // decision engine (PDF + envelope + PENDING + its callback) is out of scope for UC 00.
-            log.info("GENERATING {} — awaiting the decision engine (not yet implemented)",
-                    applicationId);
+            // Accepted, or not yet gated: pin this case's terms, generate the agreement document,
+            // then send it for signature via UC 07's e-sign provider.
+            AgreementConfig config = currentConfig();
+            Application.Product product = request.application().product();
+            Integer approvedLimit = product == null ? null : product.requestedCreditLimit();
+            Integer minPaymentGbp = approvedLimit == null ? null : config.minPaymentFor(approvedLimit);
+            pinTerms(applicationId, reference(applicationId), config.getTermsVersion(),
+                    approvedLimit, config.getAprPercent(), minPaymentGbp);
+
+            String productCode = product == null ? null : product.productCode();
+            String documentSha = agreementDocuments.compose(applicationId,
+                    new AgreementDocumentComposer.Content(signerName(request), productCode,
+                            approvedLimit, config.getAprPercent(), minPaymentGbp,
+                            config.getTermsVersion()));
+            sendForSignature(applicationId, signerName(request), documentSha, config);
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
             // nothing to explain it. Refer it to a human and say why.
@@ -145,6 +183,68 @@ public class ApplicationService {
             orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
                     "module error: " + e);
         }
+    }
+
+    /**
+     * UC 07's wiring: register an envelope with the e-sign provider, stamp the case
+     * {@code GENERATING → PENDING} with that envelope and its expiry, tell the orchestrator, then
+     * let the provider play its auto-mode (AC 2/3/4) — in that order, because
+     * {@link EsignProvider#playAutoMode} must never run before the case is actually PENDING (an
+     * {@code INSTANT} auto-event arriving first would find {@code SignatureEventService} still
+     * looking at {@code GENERATING} and refuse it with a 409).
+     *
+     * <p>AC 7: if the provider itself cannot be reached (any {@link RuntimeException} out of
+     * {@link EsignProvider#registerEnvelope}), the case still moves to {@code PENDING} — the
+     * document exists, it is simply un-sent — and the orchestrator is told {@code REFERRED} with
+     * {@code AGR_PROVIDER_UNAVAILABLE} rather than left to time out.</p>
+     */
+    private void sendForSignature(String applicationId, String signerName, String documentSha,
+            AgreementConfig config) {
+        try {
+            EnvelopeRegistration registration =
+                    esignProvider.registerEnvelope(applicationId, documentSha, signerName);
+            Instant sentAt = Instant.now();
+            Instant expiresAt = sentAt.plusSeconds(expirySeconds(registration.config(), config));
+            markSentForSignature(applicationId, registration.envelopeId(), sentAt, expiresAt);
+            history.save(new AgreementStatusHistory(applicationId, AgreementStatus.GENERATING,
+                    AgreementStatus.PENDING, "ENVELOPE_SENT", "system", sentAt));
+            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
+                    "agreement sent for signature — case moved to PENDING");
+            esignProvider.playAutoMode(applicationId, registration);
+        } catch (RuntimeException esignDown) {
+            log.warn("e-sign provider unreachable for {} — referring for manual handling",
+                    applicationId, esignDown);
+            updateStatus(applicationId, AgreementStatus.PENDING);
+            history.save(new AgreementStatusHistory(applicationId, AgreementStatus.GENERATING,
+                    AgreementStatus.PENDING, "AGR_PROVIDER_UNAVAILABLE", "system", Instant.now()));
+            orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
+                    "AGR_PROVIDER_UNAVAILABLE — e-sign provider unreachable, application-manual");
+        }
+    }
+
+    private static String signerName(ApplicationRequest request) {
+        Application.Applicant applicant = request.application().applicant();
+        return applicant == null ? null : applicant.fullName();
+    }
+
+    /** Deterministic and idempotent: the same {@code applicationId} always yields the same reference. */
+    private static String reference(String applicationId) {
+        int hash = Math.abs(applicationId.hashCode()) % 1_000_000;
+        return String.format("agr-%06d", hash);
+    }
+
+    private AgreementConfig currentConfig() {
+        return agreementConfigs.findTopByOrderByVersionDesc()
+                .orElseGet(() -> new AgreementConfig(0, "unversioned", DEFAULT_EXPIRY_DAYS,
+                        java.math.BigDecimal.ZERO, 0, java.math.BigDecimal.ZERO));
+    }
+
+    private static int expirySeconds(EsignConfigView esignConfig, AgreementConfig agreementConfig) {
+        Integer demoExpirySeconds = esignConfig.demoExpirySeconds();
+        if (demoExpirySeconds != null) {
+            return demoExpirySeconds;
+        }
+        return agreementConfig.getExpiryDays() * 24 * 3600;
     }
 
     // Deliberately not relying on @Transactional + dirty-checking here: decide() calls this via
@@ -155,6 +255,24 @@ public class ApplicationService {
     void updateStatus(String applicationId, AgreementStatus status) {
         agreementRecords.findById(applicationId).ifPresent(record -> {
             record.changeStatus(status);
+            agreementRecords.save(record);
+        });
+    }
+
+    /** Same self-invocation caveat as {@link #updateStatus} — see its comment. */
+    private void markSentForSignature(String applicationId, String envelopeId, Instant sentAt,
+            Instant expiresAt) {
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.markSentForSignature(envelopeId, sentAt, expiresAt);
+            agreementRecords.save(record);
+        });
+    }
+
+    /** Same self-invocation caveat as {@link #updateStatus} — see its comment. */
+    private void pinTerms(String applicationId, String reference, String termsVersion,
+            Integer approvedLimit, java.math.BigDecimal apr, Integer minPaymentGbp) {
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.pinTerms(reference, termsVersion, approvedLimit, apr, minPaymentGbp);
             agreementRecords.save(record);
         });
     }

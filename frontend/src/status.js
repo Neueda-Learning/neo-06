@@ -3,26 +3,25 @@
 //
 // The design system deliberately knows no business words (design-system/DESIGN.md § "Tones"):
 // ten modules speak ten vocabularies over one contract, and a Badge that knew "ACCEPTED" would
-// have to learn "VERIFIED", "CLEAR" and "SIGNED" too.
+// have to learn "GENERATING", "PENDING" and "SIGNED" too.
+//
+// This is UC00-UC08's AgreementStatus vocabulary — GENERATING/PENDING/SIGNED/DECLINED/EXPIRED —
+// not the orchestrator's decision vocabulary (ACCEPTED/REJECTED/REFERRED), which this module
+// only ever reports outward, never shows on its own screens.
 import { TONES, toneMapper } from './design-system';
 
 export const statusTone = toneMapper({
-  ACCEPTED: TONES.POSITIVE,
-  REJECTED: TONES.NEGATIVE,
-  REFERRED: TONES.WARNING,
-  // Kept although the skeleton never stores it: a row is written only once the work is done. If
-  // you start recording an application before you have decided about it, this is already coloured.
-  'in-progress': TONES.INFO,
+  GENERATING: TONES.INFO,
+  PENDING: TONES.WARNING,
+  SIGNED: TONES.POSITIVE,
+  DECLINED: TONES.NEGATIVE,
+  EXPIRED: TONES.NEGATIVE,
 });
 
-/**
- * The statuses the board filters on — the three a module can answer with.
- *
- * `in-progress` is not here on purpose: the placeholder writes its row after the work, so no row
- * is ever in that state and a chip for it would always read zero. Add it if you change that.
- */
-export const STATUSES = ['ACCEPTED', 'REJECTED', 'REFERRED'];
+/** The statuses the board filters on. GENERATING is internal but still visible to operators. */
+export const STATUSES = ['GENERATING', 'PENDING', 'SIGNED', 'DECLINED', 'EXPIRED'];
 
 export function time(iso) {
-  return iso ? new Date(iso).toLocaleTimeString() : '—';
+  return iso ? new Date(iso).toLocaleString() : '—';
 }
+

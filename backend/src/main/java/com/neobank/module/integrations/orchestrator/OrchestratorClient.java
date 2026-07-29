@@ -56,4 +56,34 @@ public class OrchestratorClient {
                     + "will notice", applicationId, e.toString());
         }
     }
+
+    /**
+     * UC 03's proxy: {@code GET /api/v1/applications/{applicationId}} — the standard
+     * application-fetch every module ships (see
+     * {@code module-06-agreement-management-docs/uc-03-view-applicant.md}). Also reused, at a
+     * small (≤10 call) budget, by UC 01's name search and the board/queue's name hydration.
+     *
+     * @throws OrchestratorFetchException if the orchestrator cannot be reached or returns an
+     *         error — never silently swallowed here, unlike the outbound callback: the CALLER
+     *         (an interactive read) needs to know the difference between "no data" and "could not
+     *         ask".
+     */
+    public Application getApplication(String applicationId) {
+        try {
+            return http.get()
+                    .uri(applicationsUrl + "/" + applicationId)
+                    .retrieve()
+                    .body(Application.class);
+        } catch (Exception e) {
+            throw new OrchestratorFetchException(
+                    "could not fetch application " + applicationId + " from the orchestrator", e);
+        }
+    }
+
+    /** See {@link #getApplication}. */
+    public static class OrchestratorFetchException extends RuntimeException {
+        public OrchestratorFetchException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

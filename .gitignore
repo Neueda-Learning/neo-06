@@ -16,3 +16,10 @@ frontend/dist/
 
 # Local env overrides
 .env
+
+# docs and prompts
+docs/
+prompts/
+module-06-agreement-management-docs/
+*.pptx
+

@@ -1,61 +1,46 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppShell, Button, SideBrand, SideNav, StatusPill } from './design-system';
-import RequestsScreen from './components/RequestsScreen.jsx';
+import { AppShell, Button, SideBrand, SideNav, StatusPill, TextInput } from './design-system';
+import AgreementBoard from './components/AgreementBoard.jsx';
+import QueueScreen from './components/QueueScreen.jsx';
+import EsignMockPanel from './components/EsignMockPanel.jsx';
 import { api } from './api.js';
 
-const POLL_MS = 2000;
 const HEALTH_MS = 10000;
+const OPERATOR_KEY = 'neo06.operator';
 
-/**
- * The screens in the side menu.
- *
- * ⚠️ One real screen and three placeholders — the placeholders are there so the menu shows you
- * where your own screens go, and they are `disabled` so nobody clicks into nothing. Replace them
- * with what your business topic actually needs; the operator UI is a graded deliverable, and a
- * single read-only list is not one.
- */
+/** The screens in the side menu — UC01/02/03/04/05/08's board and queue, plus UC07's dials. */
 const SCREENS = [
-  { id: 'applications', label: 'Applications' },
-  { id: 'cases', label: 'Cases', hint: 'your own table', disabled: true },
-  { id: 'overrides', label: 'Overrides', hint: 'operator actions', disabled: true },
-  { id: 'settings', label: 'Settings', hint: 'reference data', disabled: true },
+  { id: 'board', label: 'Agreement board', hint: 'UC 01\u201303\u201305\u201308 \u2014 search, review, act' },
+  { id: 'queue', label: 'Pending & expired queue', hint: 'UC 04 \u2014 resend' },
+  { id: 'esign-mock', label: 'Mock control panel', hint: 'UC 07 \u2014 e-sign dials' },
 ];
 
 /**
  * A sidebar rather than a top bar: this app is expected to grow more screens than a row of tabs
  * holds, and the menu is where a team plans that growth. The identity box above it is the only
  * place the app says who it belongs to — its values come from `/info`, so the same image reads
- * "Team 07" once SERVICE_TEAM says so.
+ * "Team 06" once SERVICE_TEAM says so.
  */
 export default function App() {
-  const [screen, setScreen] = useState('applications');
-  const [requests, setRequests] = useState([]);
+  const [screen, setScreen] = useState('board');
   const [error, setError] = useState(null);
   const [health, setHealth] = useState(null);
   const [info, setInfo] = useState(null);
-
-  const reload = useCallback(async () => {
-    try {
-      setRequests(await api.listApplications());
-      setError(null);
-    } catch (e) {
-      setError(e.message);
-    }
-  }, []);
+  const [operator, setOperator] = useState(() => localStorage.getItem(OPERATOR_KEY) ?? '');
 
   useEffect(() => {
-    reload();
-    const id = setInterval(reload, POLL_MS);
-    return () => clearInterval(id);
-  }, [reload]);
+    localStorage.setItem(OPERATOR_KEY, operator);
+  }, [operator]);
 
   const refreshHealth = useCallback(async () => {
     try {
       const [h, i] = await Promise.all([api.health(), api.info()]);
       setHealth(h);
       setInfo(i);
-    } catch {
+      setError(null);
+    } catch (e) {
       setHealth(null);
+      setError(e.message);
     }
   }, []);
 
@@ -77,18 +62,18 @@ export default function App() {
             meta={info ? `${info.serviceId} · ${info.domain}` : undefined}
           />
           <SideNav items={SCREENS} active={screen} onSelect={setScreen} />
-          {/* Health and refresh lived in the top bar; with the bar gone they belong beside the
-              menu rather than inside it — a menu item that is not a screen is a trap. */}
           <div className="app-side-status">
+            <label className="app-side-operator">
+              <span>Operator</span>
+              <TextInput
+                value={operator}
+                onChange={(e) => setOperator(e.target.value)}
+                placeholder="your name"
+                aria-label="Operator name — recorded on every resend and override"
+              />
+            </label>
             <StatusPill tone={up ? 'positive' : 'negative'}>{up ? 'Up' : 'Down'}</StatusPill>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                reload();
-                refreshHealth();
-              }}
-            >
+            <Button variant="ghost" size="sm" onClick={refreshHealth}>
               Refresh
             </Button>
           </div>
@@ -96,9 +81,10 @@ export default function App() {
       }
       footer="One of ten modules · applications arrive from the orchestrator, never from this UI"
     >
-      {screen === 'applications' && (
-        <RequestsScreen requests={requests} error={error} info={info} />
-      )}
+      {screen === 'board' && <AgreementBoard operator={operator} />}
+      {screen === 'queue' && <QueueScreen operator={operator} />}
+      {screen === 'esign-mock' && <EsignMockPanel />}
     </AppShell>
   );
 }
+

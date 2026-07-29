@@ -46,7 +46,12 @@ public class AgreementRecord {
     @Column(length = 32)
     private String reference;
 
-    /** The CURRENT envelope registered with the e-sign mock. Null until sent. */
+    /**
+     * The CURRENT envelope registered with the e-sign mock, e.g. {@code env-8f14e45f}. Null until
+     * the decision engine (UC 05, not yet built) sends the case for signature; a resend rotates
+     * it, and the old envelope's late events are refused by {@code SignatureEventService}'s
+     * guard (UC 06).
+     */
     @Column(name = "envelope_id", length = 64)
     private String envelopeId;
 
@@ -74,7 +79,11 @@ public class AgreementRecord {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
-    /** When the customer's SIGNED event landed; null unless signed. */
+    /**
+     * When the customer's {@code SIGNED} event landed — carried in callback 2's detail; null
+     * unless signed. Stamped by {@link #sign(Instant)} (UC 06) with the event's own
+     * {@code occurredAt}, not processing time.
+     */
     @Column(name = "signed_at")
     private Instant signedAt;
 
@@ -94,6 +103,19 @@ public class AgreementRecord {
     public AgreementRecord(String applicationId, AgreementStatus status) {
         this.applicationId = applicationId;
         this.status = status;
+    }
+
+    /**
+     * A case already registered with the e-sign provider: an id, its status, and the envelope
+     * UC 06 matches incoming signature events against.
+     *
+     * <p>Mind the third argument — here it is the ENVELOPE id, while the eleven-argument
+     * constructor below takes {@code reference} in that position.
+     */
+    public AgreementRecord(String applicationId, AgreementStatus status, String envelopeId) {
+        this.applicationId = applicationId;
+        this.status = status;
+        this.envelopeId = envelopeId;
     }
 
     /** The full shape a later use case (or a test fixture) populates once terms are pinned. */
@@ -131,6 +153,48 @@ public class AgreementRecord {
     /** The only mutation UC 00 performs post-insert: the consent-gate move to DECLINED. */
     public void changeStatus(AgreementStatus newStatus) {
         this.status = newStatus;
+    }
+
+    /**
+     * UC 06's SIGNED transition: the status moves to {@link AgreementStatus#SIGNED} and
+     * {@code signedAt} is stamped with the event's own {@code occurredAt} — not
+     * {@code Instant.now()} — so the record carries when the customer actually signed, not when
+     * this module happened to process it.
+     */
+    public void sign(Instant occurredAt) {
+        this.status = AgreementStatus.SIGNED;
+        this.signedAt = occurredAt;
+    }
+
+    /**
+     * UC 07's wiring: the case has an envelope registered with the e-sign mock and is now
+     * awaiting the customer — {@code GENERATING → PENDING}, stamped with the CURRENT envelope
+     * and the window {@code SignatureEventService}/the expiry clock will judge it against.
+     *
+     * <p>Reused for every later (re)send — UC 04's resend and UC 08's DECLINED → PENDING revive
+     * both land the case back on {@code PENDING} with a fresh envelope and clock the same way the
+     * original send did; the doc's own state diagram draws all three as the same edge.</p>
+     */
+    public void markSentForSignature(String envelopeId, Instant sentAt, Instant expiresAt) {
+        this.status = AgreementStatus.PENDING;
+        this.envelopeId = envelopeId;
+        this.sentAt = sentAt;
+        this.expiresAt = expiresAt;
+    }
+
+    /**
+     * Pins the terms a case is generated under — {@code reference}, {@code termsVersion}, the
+     * priced limits — once, at GENERATING, from the {@code AgreementConfig} version in force and
+     * the application's requested figures. Never called again for this row: UC 02 AC6 requires
+     * the STORED terms to survive a later config change untouched.
+     */
+    public void pinTerms(String reference, String termsVersion, Integer approvedLimit,
+            BigDecimal apr, Integer minPaymentGbp) {
+        this.reference = reference;
+        this.termsVersion = termsVersion;
+        this.approvedLimit = approvedLimit;
+        this.apr = apr;
+        this.minPaymentGbp = minPaymentGbp;
     }
 
     public String getApplicationId() {

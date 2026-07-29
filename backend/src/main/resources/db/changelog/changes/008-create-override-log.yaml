@@ -1,0 +1,58 @@
+# OverrideLog — audit trail for UC 08 (Override Case). One row per manual override, none ever
+# deleted. See module-06-agreement-management-docs/uc-08-override-case.md.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
+databaseChangeLog:
+  - changeSet:
+      id: 008-create-override-log
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: override_log
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: application_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: old_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: new_status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reason
+                  type: VARCHAR(512)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: operator
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: overridden_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: override_log
+            indexName: idx_override_log_application_id
+            columns:
+              - column:
+                  name: application_id
+      rollback:
+        - dropTable:
+            tableName: override_log

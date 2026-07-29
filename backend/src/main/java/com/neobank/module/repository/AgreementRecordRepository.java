@@ -1,6 +1,7 @@
 package com.neobank.module.repository;
 
 import com.neobank.module.model.AgreementRecord;
+import com.neobank.module.model.AgreementStatus;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -20,4 +21,8 @@ public interface AgreementRecordRepository extends JpaRepository<AgreementRecord
      * page loads.
      */
     List<AgreementRecord> findAllByOrderByCreatedAtDescApplicationIdDesc();
+
+    /** UC 04's queue: oldest {@code sentAt} first — the cases aging longest surface first. */
+    List<AgreementRecord> findByStatusOrderBySentAtAsc(AgreementStatus status);
 }
+

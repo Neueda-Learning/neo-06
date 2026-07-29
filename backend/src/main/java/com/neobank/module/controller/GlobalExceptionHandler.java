@@ -1,5 +1,8 @@
 package com.neobank.module.controller;
 
+import com.neobank.module.service.CaseConflictException;
+import com.neobank.module.service.OrchestratorUnavailableException;
+import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -16,19 +19,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * predictable body instead of a stack trace — {@code server.error.include-*=never} in
  * {@code application.yml} makes sure nothing leaks past this class.
  *
- * <p>Add a handler per exception your own code throws.</p>
+ * <p>Add a handler per exception your own code throws — {@link #handleNotFound} and
+ * {@link #handleConflict} below are UC 06's.</p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-
-    /**
-     * A lookup that found nothing — UC02's {@code GET /cases/{applicationId}} for an unknown id
-     * (AC7: {@code 404} with a JSON error body, never a {@code 500}).
-     */
-    @ExceptionHandler(NoSuchElementException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
-        return error(HttpStatus.NOT_FOUND, ex.getMessage());
-    }
 
     /**
      * A field failed validation — in practice, an envelope with no {@code applicationId}. The
@@ -57,6 +52,43 @@ public class GlobalExceptionHandler {
         int newline = message == null ? -1 : message.indexOf('\n');
         return error(HttpStatus.BAD_REQUEST,
                 "malformed request body: " + (newline > 0 ? message.substring(0, newline) : message));
+    }
+
+    /**
+     * UC 06's 404: an {@code applicationId} on {@code /cases/{id}/signature-events} that this
+     * module has no row for.
+     */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /**
+     * UC 06's 409: the case exists but the signature event is out of turn — a stale envelope, a
+     * state other than {@code PENDING}, or a decision that contradicts one already made.
+     */
+    @ExceptionHandler(SignatureEventConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleConflict(SignatureEventConflictException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** UC 04/05/08's 409s: a real case, an action that is simply out of turn right now. */
+    @ExceptionHandler(CaseConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleCaseConflict(CaseConflictException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** A caller-supplied value is not one this endpoint accepts — e.g. UC 08's {@code newStatus}. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** UC 03 AC4: the orchestrator proxy could not be reached — retryable, not this case's fault. */
+    @ExceptionHandler(OrchestratorUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleOrchestratorUnavailable(
+            OrchestratorUnavailableException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
