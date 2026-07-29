@@ -17,6 +17,8 @@ import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.Decision;
 import com.neobank.module.repository.AgreementRecordRepository;
+import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +39,8 @@ class ApplicationServiceTest {
     private AgreementRecordRepository agreementRecords;
     private OrchestratorClient orchestrator;
     private AgreementDocumentComposer agreementDocuments;
+    private AgreementStatusHistoryRepository history;
+    private EnvelopeService envelopes;
     private ApplicationService service;
 
     @BeforeEach
@@ -45,7 +49,13 @@ class ApplicationServiceTest {
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
         agreementDocuments = mock(AgreementDocumentComposer.class);
-        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator, agreementDocuments);
+        history = mock(AgreementStatusHistoryRepository.class);
+        envelopes = mock(EnvelopeService.class);
+        when(envelopes.register(any()))
+                .thenReturn(new EnvelopeService.Registration("env-test1234", Instant.now(),
+                        Instant.now().plusSeconds(5 * 24 * 3600)));
+        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator,
+                agreementDocuments, history, envelopes);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
     }
 
@@ -129,7 +139,11 @@ class ApplicationServiceTest {
 
         verify(agreementDocuments).compose(eq("SIM-04"), any(Application.class));
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        assertThat(row.getEnvelopeId()).isEqualTo("env-test1234");
+        assertThat(row.getSentAt()).isNotNull();
+        assertThat(row.getExpiresAt()).isNotNull();
         verify(agreementRecords).save(row);
+        verify(history).save(any());
         verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
     }
 

@@ -166,6 +166,20 @@ public class AgreementRecord {
         this.signedAt = occurredAt;
     }
 
+    /**
+     * (Re)sends the case for signature: registers a fresh envelope, resets the expiry clock, and
+     * moves the status to {@link AgreementStatus#PENDING} — whether this is the FIRST send (from
+     * {@code GENERATING}, UC 00) or a resend rotating a stale envelope (from {@code PENDING} or
+     * {@code EXPIRED}, UC 04). Same method either way: a resend is just "send again" with a
+     * different starting status.
+     */
+    public void sendForSignature(String envelopeId, Instant sentAt, Instant expiresAt) {
+        this.envelopeId = envelopeId;
+        this.sentAt = sentAt;
+        this.expiresAt = expiresAt;
+        this.status = AgreementStatus.PENDING;
+    }
+
     public String getApplicationId() {
         return applicationId;
     }

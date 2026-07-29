@@ -1,6 +1,7 @@
 package com.neobank.module.controller;
 
 import com.neobank.module.service.AgreementDocumentNotGeneratedException;
+import com.neobank.module.service.ResendNotAllowedException;
 import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -19,8 +20,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * {@code application.yml} makes sure nothing leaks past this class.
  *
  * <p>Add a handler per exception your own code throws — {@link #handleNotFound},
- * {@link #handleConflict} and {@link #handleDocumentNotGenerated} below are UC 06's and UC 05's.
- * </p>
+ * {@link #handleConflict}, {@link #handleDocumentNotGenerated} and {@link #handleResendNotAllowed}
+ * below are UC 06's, UC 05's and UC 04's.</p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -80,6 +81,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AgreementDocumentNotGeneratedException.class)
     public ResponseEntity<Map<String, Object>> handleDocumentNotGenerated(
             AgreementDocumentNotGeneratedException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * UC 04's {@code 409}: {@code POST /cases/{id}/resend} for a case that is not
+     * {@code PENDING}/{@code EXPIRED} — see {@code docs/uc-04-pending-expired-queue.md} AC5.
+     */
+    @ExceptionHandler(ResendNotAllowedException.class)
+    public ResponseEntity<Map<String, Object>> handleResendNotAllowed(ResendNotAllowedException ex) {
         return error(HttpStatus.CONFLICT, ex.getMessage());
     }
 

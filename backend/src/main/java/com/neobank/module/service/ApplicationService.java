@@ -6,8 +6,10 @@ import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
+import com.neobank.module.model.AgreementStatusHistory;
 import com.neobank.module.model.Decision;
 import com.neobank.module.repository.AgreementRecordRepository;
+import com.neobank.module.repository.AgreementStatusHistoryRepository;
 import java.util.List;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
@@ -20,14 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>Deciding anything beyond the consent gate (registering a REAL e-sign envelope, and the real
- * numbers an {@code AgreementConfig} would produce) is the decision engine — a later use case,
- * and explicitly out of scope for this one (see the UC 00 brief's "Out of scope"). What IS done
- * here, once the consent gate has passed: UC05's placeholder agreement PDF is generated (via
- * {@link AgreementDocumentComposer}), the row moves {@code GENERATING → PENDING}, and the
- * orchestrator is told {@code ACCEPTED} so the journey advances — there is nothing left to wait
- * for without a real e-sign provider. What belongs here is exactly what the brief's acceptance
- * criteria ask for, plus that:</p>
+ * <p>Deciding anything beyond the consent gate (the real numbers an {@code AgreementConfig} would
+ * produce) is the decision engine — a later use case, and explicitly out of scope for this one
+ * (see the UC 00 brief's "Out of scope"). What IS done here, once the consent gate has passed:
+ * UC05's placeholder agreement PDF is generated (via {@link AgreementDocumentComposer}), the case
+ * is sent for signature (UC 04's {@link EnvelopeService} — a MOCK envelope until UC 07 lands a
+ * real e-sign provider to call instead), the row moves {@code GENERATING → PENDING}, and the
+ * orchestrator is told {@code ACCEPTED} so the journey advances. What belongs here is exactly what
+ * the brief's acceptance criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -53,15 +55,21 @@ public class ApplicationService {
     private final AgreementRecordRepository agreementRecords;
     private final OrchestratorClient orchestrator;
     private final AgreementDocumentComposer agreementDocuments;
+    private final AgreementStatusHistoryRepository history;
+    private final EnvelopeService envelopes;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               AgreementRecordRepository agreementRecords,
                               OrchestratorClient orchestrator,
-                              AgreementDocumentComposer agreementDocuments) {
+                              AgreementDocumentComposer agreementDocuments,
+                              AgreementStatusHistoryRepository history,
+                              EnvelopeService envelopes) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
         this.orchestrator = orchestrator;
         this.agreementDocuments = agreementDocuments;
+        this.history = history;
+        this.envelopes = envelopes;
     }
 
     /**
@@ -125,10 +133,10 @@ public class ApplicationService {
      * <p>Only the consent gate is decided here (see class javadoc): {@code termsAccepted} false
      * moves the row to {@link AgreementStatus#DECLINED} and reports {@code REJECTED} — nothing
      * is generated for a case that never gets one. Otherwise (accepted, or not yet gated) this
-     * generates UC05's placeholder agreement PDF, moves the row to
-     * {@link AgreementStatus#PENDING}, and reports {@code ACCEPTED} — the REAL numbers (a real
-     * e-sign envelope, an {@code AgreementConfig}-priced offer) are still the decision engine use
-     * case's job.</p>
+     * generates UC05's placeholder agreement PDF, sends the case for signature (mock envelope,
+     * moves the row to {@link AgreementStatus#PENDING}), and reports {@code ACCEPTED} — the REAL
+     * priced offer an {@code AgreementConfig} would produce (approvedLimit/apr/termsVersion) is
+     * still the decision engine use case's job.</p>
      */
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
@@ -143,13 +151,11 @@ public class ApplicationService {
                 return;
             }
 
-            // Accepted, or not yet gated: generate the agreement document, move the case to
-            // PENDING (awaiting the customer's signature) and tell the orchestrator so the
-            // journey advances — there is nothing left to wait for without a real e-sign provider
-            // to register an envelope with. See AgreementDocumentComposer.compose's javadoc for
-            // what it still cannot print (approvedLimit/apr/termsVersion) and why.
+            // Accepted, or not yet gated: generate the agreement document, send the case for
+            // signature (UC 04's EnvelopeService — a mock envelope until UC 07 lands a real
+            // provider) and tell the orchestrator so the journey advances.
             agreementDocuments.compose(applicationId, request.application());
-            updateStatus(applicationId, AgreementStatus.PENDING);
+            sendForSignature(applicationId);
             orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
                     "agreement document generated — case moved to PENDING");
         } catch (RuntimeException e) {
@@ -170,6 +176,25 @@ public class ApplicationService {
         agreementRecords.findById(applicationId).ifPresent(record -> {
             record.changeStatus(status);
             agreementRecords.save(record);
+        });
+    }
+
+    /**
+     * UC 00's initial send: registers a mock envelope ({@link EnvelopeService}), moves the row
+     * {@code GENERATING → PENDING} with real {@code envelopeId}/{@code sentAt}/{@code expiresAt}
+     * values, and appends the {@code SENT} audit row UC 04's queue derives {@code envelopeCount}
+     * from. Same self-invocation caveat as {@link #updateStatus} applies — an explicit
+     * {@code save()}, not {@code @Transactional} dirty-checking.
+     */
+    private void sendForSignature(String applicationId) {
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            AgreementStatus fromStatus = record.getStatus();
+            EnvelopeService.Registration registration = envelopes.register(applicationId);
+            record.sendForSignature(registration.envelopeId(), registration.sentAt(),
+                    registration.expiresAt());
+            agreementRecords.save(record);
+            history.save(new AgreementStatusHistory(applicationId, fromStatus, AgreementStatus.PENDING,
+                    "SENT", "system", registration.sentAt()));
         });
     }
 
