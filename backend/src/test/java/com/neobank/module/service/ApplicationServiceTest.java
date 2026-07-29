@@ -73,9 +73,9 @@ class ApplicationServiceTest {
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
 
-        // Not declined (no consents block yet), so the placeholder agreement PDF is generated,
-        // the case moves toward PENDING, and the orchestrator is told ACCEPTED.
-        verify(agreementDocuments).compose("SIM-01");
+        // Not declined (no consents block yet), so the agreement PDF is generated, the case
+        // moves toward PENDING, and the orchestrator is told ACCEPTED.
+        verify(agreementDocuments).compose(eq("SIM-01"), any(Application.class));
         verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.ACCEPTED), any());
     }
 
@@ -127,7 +127,7 @@ class ApplicationServiceTest {
 
         service.decide(request("SIM-04", true));
 
-        verify(agreementDocuments).compose("SIM-04");
+        verify(agreementDocuments).compose(eq("SIM-04"), any(Application.class));
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
         verify(agreementRecords).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
@@ -142,7 +142,7 @@ class ApplicationServiceTest {
 
         service.decide(request("SIM-05", null));
 
-        verify(agreementDocuments).compose("SIM-05");
+        verify(agreementDocuments).compose(eq("SIM-05"), any(Application.class));
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.ACCEPTED), any());
     }

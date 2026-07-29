@@ -1,5 +1,6 @@
 package com.neobank.module.controller;
 
+import com.neobank.module.service.AgreementDocumentNotGeneratedException;
 import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -17,8 +18,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * predictable body instead of a stack trace — {@code server.error.include-*=never} in
  * {@code application.yml} makes sure nothing leaks past this class.
  *
- * <p>Add a handler per exception your own code throws — {@link #handleNotFound} and
- * {@link #handleConflict} below are UC 06's.</p>
+ * <p>Add a handler per exception your own code throws — {@link #handleNotFound},
+ * {@link #handleConflict} and {@link #handleDocumentNotGenerated} below are UC 06's and UC 05's.
+ * </p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -67,6 +69,17 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(SignatureEventConflictException.class)
     public ResponseEntity<Map<String, Object>> handleConflict(SignatureEventConflictException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * UC 05's {@code 409}: {@code GET /cases/{id}/document} for a real case whose consent gate
+     * declined it before any document was generated — see
+     * {@code prompts/uc-05-prompt.md} AC7.
+     */
+    @ExceptionHandler(AgreementDocumentNotGeneratedException.class)
+    public ResponseEntity<Map<String, Object>> handleDocumentNotGenerated(
+            AgreementDocumentNotGeneratedException ex) {
         return error(HttpStatus.CONFLICT, ex.getMessage());
     }
 
