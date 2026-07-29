@@ -17,15 +17,9 @@ frontend/dist/
 # Local env overrides
 .env
 
-<<<<<<< HEAD
-module-06-agreement-management-v5-student.pptx
-module-06-agreement-management-v5-use-cases.pptx
-module-06-agreement-management-docs
-=======
 # docs and prompts
 docs/
 prompts/
 module-06-agreement-management-docs/
 *.pptx
 
->>>>>>> 34f17f822e79a9fdeb0cc55bf3fb20eeea83ef3d
