@@ -31,8 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link AgreementDocumentComposer}) with those terms printed on it, an envelope is registered
  * with UC 07's e-sign provider (via {@link EsignProvider}), the row moves
  * {@code GENERATING → PENDING} carrying that envelope and its expiry, and the orchestrator is told
- * {@code ACCEPTED} so the journey advances. What belongs here is exactly what the brief's
- * acceptance criteria ask for, plus that:</p>
+ * {@code PENDING} so the journey <em>holds on this step</em> until the customer signs. What
+ * belongs here is exactly what the brief's acceptance criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -187,8 +187,9 @@ public class ApplicationService {
 
     /**
      * UC 07's wiring: register an envelope with the e-sign provider, stamp the case
-     * {@code GENERATING → PENDING} with that envelope and its expiry, tell the orchestrator, then
-     * let the provider play its auto-mode (AC 2/3/4) — in that order, because
+     * {@code GENERATING → PENDING} with that envelope and its expiry, tell the orchestrator that
+     * we are waiting rather than done, then let the provider play its auto-mode (AC 2/3/4) — in
+     * that order, because
      * {@link EsignProvider#playAutoMode} must never run before the case is actually PENDING (an
      * {@code INSTANT} auto-event arriving first would find {@code SignatureEventService} still
      * looking at {@code GENERATING} and refuse it with a 409).
@@ -208,8 +209,8 @@ public class ApplicationService {
             markSentForSignature(applicationId, registration.envelopeId(), sentAt, expiresAt);
             history.save(new AgreementStatusHistory(applicationId, AgreementStatus.GENERATING,
                     AgreementStatus.PENDING, "ENVELOPE_SENT", "system", sentAt));
-            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
-                    "agreement sent for signature — case moved to PENDING");
+            orchestrator.applicationStatusUpdate(applicationId, Decision.PENDING,
+                    "agreement sent for signature — waiting for the customer");
             esignProvider.playAutoMode(applicationId, registration);
         } catch (RuntimeException esignDown) {
             log.warn("e-sign provider unreachable for {} — referring for manual handling",

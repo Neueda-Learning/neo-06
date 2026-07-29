@@ -1,0 +1,39 @@
+# The e-sign mock stops signing on the customer's behalf.
+#
+# 006 seeded mode=INSTANT, and INSTANT fires INLINE inside sendForSignature — the envelope is
+# registered, the case moves to PENDING, and the mock posts SIGNED back through
+# /cases/{id}/signature-events before that method has returned. The whole exchange takes about
+# ten milliseconds, so there was never a moment in which a customer could be shown the agreement:
+# by the time the orchestrator recorded "waiting for the customer", the customer had signed.
+#
+# SILENT posts nothing and lets the case sit PENDING, which is what "sent for signature" actually
+# means. The signature then arrives the way it does in life: from the person, through the
+# orchestrator-hosted signing page, into the same /cases/{id}/signature-events door.
+#
+# This is a DEFAULT, not a lock. UC 07's dial (PUT /esign/config) still switches the provider back
+# to INSTANT or DELAYED for demonstrating the auto-modes, and nothing about the module's own
+# behaviour changes — only which mode a fresh database starts in.
+#
+# A new change set rather than an edit to 006: that one is applied everywhere already, and
+# editing an applied change set changes its checksum and stops the module booting.
+databaseChangeLog:
+  - changeSet:
+      id: 009-default-esign-silent
+      author: neo-06
+      comment: Wait for the customer instead of auto-signing for them
+      changes:
+        - update:
+            tableName: esign_provider_config
+            columns:
+              - column:
+                  name: mode
+                  value: SILENT
+            where: id = 1
+      rollback:
+        - update:
+            tableName: esign_provider_config
+            columns:
+              - column:
+                  name: mode
+                  value: INSTANT
+            where: id = 1
