@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppShell, Button, SideBrand, SideNav, StatusPill } from './design-system';
 import RequestsScreen from './components/RequestsScreen.jsx';
+import EsignMockPanel from './components/EsignMockPanel.jsx';
 import { api } from './api.js';
 
 const POLL_MS = 2000;
@@ -16,6 +17,7 @@ const HEALTH_MS = 10000;
  */
 const SCREENS = [
   { id: 'applications', label: 'Applications' },
+  { id: 'esign-mock', label: 'Mock control panel', hint: 'UC 07 — e-sign dials' },
   { id: 'cases', label: 'Cases', hint: 'your own table', disabled: true },
   { id: 'overrides', label: 'Overrides', hint: 'operator actions', disabled: true },
   { id: 'settings', label: 'Settings', hint: 'reference data', disabled: true },
@@ -99,6 +101,7 @@ export default function App() {
       {screen === 'applications' && (
         <RequestsScreen requests={requests} error={error} info={info} />
       )}
+      {screen === 'esign-mock' && <EsignMockPanel />}
     </AppShell>
   );
 }

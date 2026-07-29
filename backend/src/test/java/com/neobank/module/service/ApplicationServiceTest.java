@@ -10,12 +10,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.neobank.module.dto.EsignConfigView;
 import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.Decision;
+import com.neobank.module.model.EsignMode;
+import com.neobank.module.model.EsignOutcome;
 import com.neobank.module.repository.AgreementRecordRepository;
 import java.util.List;
 import java.util.Optional;
@@ -26,10 +29,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * UC 00's two halves, tested separately: {@link ApplicationService#processApplicationAsync} (the
- * durable row + idempotency + hand-off) and {@link ApplicationService#decide} (the one decision
- * this use case owns — the consent gate).
+ * durable row + idempotency + hand-off) and {@link ApplicationService#decide} (the consent gate
+ * plus UC 07's send-for-signature wiring).
  *
- * <p>No Spring, no database, no HTTP — the service takes a request and calls two collaborators, so
+ * <p>No Spring, no database, no HTTP — the service takes a request and calls its collaborators, so
  * each test is a handful of lines.</p>
  */
 class ApplicationServiceTest {
@@ -37,6 +40,7 @@ class ApplicationServiceTest {
     private AgreementRecordRepository agreementRecords;
     private OrchestratorClient orchestrator;
     private AgreementDocumentComposer agreementDocuments;
+    private EsignProvider esignProvider;
     private ApplicationService service;
 
     @BeforeEach
@@ -45,8 +49,13 @@ class ApplicationServiceTest {
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
         agreementDocuments = mock(AgreementDocumentComposer.class);
-        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator, agreementDocuments);
+        esignProvider = mock(EsignProvider.class);
+        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator,
+                agreementDocuments, esignProvider);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
+        // Default: a fresh envelope, INSTANT/SIGN, no demo expiry override — most tests don't care.
+        when(esignProvider.registerEnvelope(any(), any(), any())).thenReturn(new EnvelopeRegistration(
+                "env-test", new EsignConfigView(EsignMode.INSTANT, 0, EsignOutcome.SIGN, null)));
     }
 
     private static ApplicationRequest request(String id, Boolean termsAccepted) {
@@ -131,6 +140,47 @@ class ApplicationServiceTest {
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
         verify(agreementRecords).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
+    }
+
+    @Test
+    void sendingForSignatureStampsTheEnvelopeAndExpiryBeforeReportingAndPlayingAutoMode() {
+        // UC 07: the envelope, sentAt and expiresAt all land on the row, in that order relative to
+        // the orchestrator callback and the auto-mode playback — playAutoMode must never run
+        // before the row is actually PENDING (see the class javadoc on sendForSignature).
+        AgreementRecord row = new AgreementRecord("SIM-08", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-08")).thenReturn(Optional.of(row));
+        when(agreementDocuments.compose("SIM-08")).thenReturn("deadbeef");
+        EnvelopeRegistration registration = new EnvelopeRegistration("env-abc123",
+                new EsignConfigView(EsignMode.SILENT, 0, EsignOutcome.SIGN, 30));
+        when(esignProvider.registerEnvelope("SIM-08", "deadbeef", "Maria Nowak"))
+                .thenReturn(registration);
+
+        service.decide(request("SIM-08", true));
+
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        assertThat(row.getEnvelopeId()).isEqualTo("env-abc123");
+        assertThat(row.getSentAt()).isNotNull();
+        // demoExpirySeconds=30 on the snapshot taken at registration → expiresAt ~30s after sentAt.
+        assertThat(row.getExpiresAt()).isEqualTo(row.getSentAt().plusSeconds(30));
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-08"), eq(Decision.ACCEPTED), any());
+        verify(esignProvider).playAutoMode("SIM-08", registration);
+    }
+
+    @Test
+    void anUnreachableEsignProviderStillMovesTheCaseToPendingAndRefersIt() {
+        // AC 7: the send leg fails, but the document exists — the case is un-sent, not un-decided.
+        AgreementRecord row = new AgreementRecord("SIM-09", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-09")).thenReturn(Optional.of(row));
+        when(esignProvider.registerEnvelope(any(), any(), any()))
+                .thenThrow(new IllegalStateException("mock down"));
+
+        service.decide(request("SIM-09", true));
+
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        assertThat(row.getEnvelopeId()).isNull();
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-09"), eq(Decision.REFERRED),
+                org.mockito.ArgumentMatchers.contains("AGR_PROVIDER_UNAVAILABLE"));
+        verify(esignProvider, never()).playAutoMode(any(), any());
     }
 
     @Test

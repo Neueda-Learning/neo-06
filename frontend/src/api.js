@@ -36,4 +36,9 @@ export const api = {
   info: () => request('/info'),
   listApplications: () => request('/api/v1/applications'),
   getApplication: (id) => request(`/api/v1/applications/${id}`),
+  // UC 07 — the one screen in this module that IS allowed to write: the e-sign mock's own
+  // admin dials, not application data.
+  getEsignConfig: () => request('/esign/config'),
+  updateEsignConfig: (update) =>
+    request('/esign/config', { method: 'PUT', body: JSON.stringify(update) }),
 };

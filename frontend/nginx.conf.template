@@ -37,6 +37,19 @@ server {
     proxy_pass http://$api_backend:8080$uri$is_args$args;
   }
 
+  # UC 07's own surface — not under /api, so it needs its own prefix match or it falls
+  # through to the SPA catch-all below and the panel gets back index.html instead of JSON.
+  location ^~ ${BASE_PATH}/esign/ {
+    set $esign_backend ${BACKEND_HOST};
+    rewrite ^${BASE_PATH}(/esign/.*)$ $1 break;
+    proxy_pass http://$esign_backend:8080$uri$is_args$args;
+  }
+  location ^~ ${BASE_PATH}/mock/esign/ {
+    set $mock_esign_backend ${BACKEND_HOST};
+    rewrite ^${BASE_PATH}(/mock/esign/.*)$ $1 break;
+    proxy_pass http://$mock_esign_backend:8080$uri$is_args$args;
+  }
+
   # Exact matches, so they also beat the regex below. The ALB target group health-checks
   # ${BASE_PATH}/health directly, bypassing its own routing rules — if this path and the
   # target group's HealthCheckPath ever disagree, every task is killed as unhealthy and

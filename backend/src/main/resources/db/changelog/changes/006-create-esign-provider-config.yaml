@@ -1,0 +1,56 @@
+# esign_provider_config — UC07, Operate Mock Control Panel
+# (module-06-agreement-management-docs/uc-07-operate-mock-control-panel.md).
+#
+# A SINGLE seeded row (id=1): the mock's own dials. In the full system this table would live in
+# the e-sign mock's own separate schema — it lives here only because this branch cannot add a new
+# container (infra change). See EsignMockService's class Javadoc.
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead (see 001's header).
+databaseChangeLog:
+  - changeSet:
+      id: 006-create-esign-provider-config
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: esign_provider_config
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: mode
+                  type: VARCHAR(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: delay_seconds
+                  type: INT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: auto_outcome
+                  type: VARCHAR(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  # NULL means "no demo override — use the real default".
+                  name: demo_expiry_seconds
+                  type: INT
+        - insert:
+            tableName: esign_provider_config
+            columns:
+              - column:
+                  name: id
+                  valueNumeric: 1
+              - column:
+                  name: mode
+                  value: INSTANT
+              - column:
+                  name: delay_seconds
+                  valueNumeric: 0
+              - column:
+                  name: auto_outcome
+                  value: SIGN

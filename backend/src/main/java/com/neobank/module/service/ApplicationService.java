@@ -1,6 +1,7 @@
 package com.neobank.module.service;
 
 import com.neobank.module.dto.AgreementRecordView;
+import com.neobank.module.dto.EsignConfigView;
 import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
@@ -8,6 +9,7 @@ import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.Decision;
 import com.neobank.module.repository.AgreementRecordRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
@@ -20,14 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>Deciding anything beyond the consent gate (registering a REAL e-sign envelope, and the real
- * numbers an {@code AgreementConfig} would produce) is the decision engine — a later use case,
- * and explicitly out of scope for this one (see the UC 00 brief's "Out of scope"). What IS done
- * here, once the consent gate has passed: UC05's placeholder agreement PDF is generated (via
- * {@link AgreementDocumentComposer}), the row moves {@code GENERATING → PENDING}, and the
- * orchestrator is told {@code ACCEPTED} so the journey advances — there is nothing left to wait
- * for without a real e-sign provider. What belongs here is exactly what the brief's acceptance
- * criteria ask for, plus that:</p>
+ * <p>Deciding anything beyond the consent gate and the send-for-signature leg (the real numbers an
+ * {@code AgreementConfig} would produce — {@code reference}, {@code termsVersion}, the priced
+ * limits) is the decision engine — a later use case, still out of scope here. What IS done here,
+ * once the consent gate has passed: UC05's placeholder agreement PDF is generated (via
+ * {@link AgreementDocumentComposer}), an envelope is registered with UC 07's e-sign provider (via
+ * {@link EsignProvider}), the row moves {@code GENERATING → PENDING} carrying that envelope and
+ * its expiry, and the orchestrator is told {@code ACCEPTED} so the journey advances. What belongs
+ * here is exactly what the brief's acceptance criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -49,19 +51,28 @@ public class ApplicationService {
 
     private static final Logger log = LoggerFactory.getLogger(ApplicationService.class);
 
+    /**
+     * Placeholder pending a real {@code AgreementConfig.expiryDays} (not yet built — see UC 07's
+     * entity model). Used only when the e-sign mock's {@code demoExpirySeconds} dial is unset.
+     */
+    private static final int DEFAULT_EXPIRY_SECONDS = 5 * 24 * 3600;
+
     private final Executor executor;
     private final AgreementRecordRepository agreementRecords;
     private final OrchestratorClient orchestrator;
     private final AgreementDocumentComposer agreementDocuments;
+    private final EsignProvider esignProvider;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               AgreementRecordRepository agreementRecords,
                               OrchestratorClient orchestrator,
-                              AgreementDocumentComposer agreementDocuments) {
+                              AgreementDocumentComposer agreementDocuments,
+                              EsignProvider esignProvider) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
         this.orchestrator = orchestrator;
         this.agreementDocuments = agreementDocuments;
+        this.esignProvider = esignProvider;
     }
 
     /**
@@ -125,10 +136,9 @@ public class ApplicationService {
      * <p>Only the consent gate is decided here (see class javadoc): {@code termsAccepted} false
      * moves the row to {@link AgreementStatus#DECLINED} and reports {@code REJECTED} — nothing
      * is generated for a case that never gets one. Otherwise (accepted, or not yet gated) this
-     * generates UC05's placeholder agreement PDF, moves the row to
-     * {@link AgreementStatus#PENDING}, and reports {@code ACCEPTED} — the REAL numbers (a real
-     * e-sign envelope, an {@code AgreementConfig}-priced offer) are still the decision engine use
-     * case's job.</p>
+     * generates UC05's placeholder agreement PDF and hands off to {@link #sendForSignature} — the
+     * REAL priced numbers ({@code AgreementConfig}) are still the decision engine use case's job.
+     * </p>
      */
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
@@ -143,14 +153,10 @@ public class ApplicationService {
                 return;
             }
 
-            // Accepted, or not yet gated: generate the placeholder agreement document, move the
-            // case to PENDING (awaiting the customer's signature) and tell the orchestrator so
-            // the journey advances — there is nothing left to wait for without a real e-sign
-            // provider to register an envelope with.
-            agreementDocuments.compose(applicationId);
-            updateStatus(applicationId, AgreementStatus.PENDING);
-            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
-                    "agreement document generated — case moved to PENDING");
+            // Accepted, or not yet gated: generate the placeholder agreement document, then send
+            // it for signature via UC 07's e-sign provider.
+            String documentSha = agreementDocuments.compose(applicationId);
+            sendForSignature(applicationId, signerName(request), documentSha);
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
             // nothing to explain it. Refer it to a human and say why.
@@ -158,6 +164,48 @@ public class ApplicationService {
             orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
                     "module error: " + e);
         }
+    }
+
+    /**
+     * UC 07's wiring: register an envelope with the e-sign provider, stamp the case
+     * {@code GENERATING → PENDING} with that envelope and its expiry, tell the orchestrator, then
+     * let the provider play its auto-mode (AC 2/3/4) — in that order, because
+     * {@link EsignProvider#playAutoMode} must never run before the case is actually PENDING (an
+     * {@code INSTANT} auto-event arriving first would find {@code SignatureEventService} still
+     * looking at {@code GENERATING} and refuse it with a 409).
+     *
+     * <p>AC 7: if the provider itself cannot be reached (any {@link RuntimeException} out of
+     * {@link EsignProvider#registerEnvelope}), the case still moves to {@code PENDING} — the
+     * document exists, it is simply un-sent — and the orchestrator is told {@code REFERRED} with
+     * {@code AGR_PROVIDER_UNAVAILABLE} rather than left to time out.</p>
+     */
+    private void sendForSignature(String applicationId, String signerName, String documentSha) {
+        try {
+            EnvelopeRegistration registration =
+                    esignProvider.registerEnvelope(applicationId, documentSha, signerName);
+            Instant sentAt = Instant.now();
+            Instant expiresAt = sentAt.plusSeconds(expirySeconds(registration.config()));
+            markSentForSignature(applicationId, registration.envelopeId(), sentAt, expiresAt);
+            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
+                    "agreement sent for signature — case moved to PENDING");
+            esignProvider.playAutoMode(applicationId, registration);
+        } catch (RuntimeException esignDown) {
+            log.warn("e-sign provider unreachable for {} — referring for manual handling",
+                    applicationId, esignDown);
+            updateStatus(applicationId, AgreementStatus.PENDING);
+            orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
+                    "AGR_PROVIDER_UNAVAILABLE — e-sign provider unreachable, application-manual");
+        }
+    }
+
+    private static String signerName(ApplicationRequest request) {
+        Application.Applicant applicant = request.application().applicant();
+        return applicant == null ? null : applicant.fullName();
+    }
+
+    private static int expirySeconds(EsignConfigView config) {
+        Integer demoExpirySeconds = config.demoExpirySeconds();
+        return demoExpirySeconds != null ? demoExpirySeconds : DEFAULT_EXPIRY_SECONDS;
     }
 
     // Deliberately not relying on @Transactional + dirty-checking here: decide() calls this via
@@ -168,6 +216,15 @@ public class ApplicationService {
     void updateStatus(String applicationId, AgreementStatus status) {
         agreementRecords.findById(applicationId).ifPresent(record -> {
             record.changeStatus(status);
+            agreementRecords.save(record);
+        });
+    }
+
+    /** Same self-invocation caveat as {@link #updateStatus} — see its comment. */
+    private void markSentForSignature(String applicationId, String envelopeId, Instant sentAt,
+            Instant expiresAt) {
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.markSentForSignature(envelopeId, sentAt, expiresAt);
             agreementRecords.save(record);
         });
     }

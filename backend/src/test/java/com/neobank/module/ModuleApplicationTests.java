@@ -110,14 +110,15 @@ class ModuleApplicationTests {
                 .andExpect(jsonPath("$.serviceId").value("neo06"))
                 .andExpect(jsonPath("$.command").value("process-application"));
 
-        // The row UC 00 writes: one AgreementRecord, moved on to PENDING once the consent-accepted
-        // happy path has generated the agreement document and reported ACCEPTED. Filtered by id,
-        // not counted: H2 is shared across the tests in this context, so a size assertion would
-        // depend on order.
+        // The row UC 00 writes, now carried through UC 07's default dials (INSTANT + SIGN, seeded
+        // by Liquibase): the case is generated, sent for signature, and — per the UC 07 brief's
+        // own AC 2 ("a fresh /execute reaches SIGNED within seconds") — auto-signed inline before
+        // this GET runs. Filtered by id, not counted: H2 is shared across the tests in this
+        // context, so a size assertion would depend on order.
         mvc.perform(get("/api/v1/applications"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].status")
-                        .value(org.hamcrest.Matchers.hasItem("PENDING")))
+                        .value(org.hamcrest.Matchers.hasItem("SIGNED")))
                 .andExpect(jsonPath("$[?(@.applicationId == 'IT-ONE')].createdAt")
                         .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.notNullValue())));
     }

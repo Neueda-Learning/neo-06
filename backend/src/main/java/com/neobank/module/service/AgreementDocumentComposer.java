@@ -48,18 +48,23 @@ public class AgreementDocumentComposer {
     }
 
     /**
-     * Generates and stores the one {@code OfferDocument} row for {@code applicationId}.
+     * Generates and stores the one {@code OfferDocument} row for {@code applicationId}, returning
+     * its SHA-256 fingerprint — UC 07's e-sign mock registers an envelope against this value.
      *
-     * <p>Idempotent: if a row already exists (a retried application, say), this does nothing —
-     * {@link #sha256Hex} is computed exactly once per application and never overwritten.</p>
+     * <p>Idempotent: if a row already exists (a retried application, say), this does nothing but
+     * return the ALREADY-stored fingerprint — {@link #sha256Hex} is computed exactly once per
+     * application and never overwritten.</p>
      */
-    public void compose(String applicationId) {
-        if (offerDocuments.findByApplicationId(applicationId).isPresent()) {
+    public String compose(String applicationId) {
+        var existing = offerDocuments.findByApplicationId(applicationId);
+        if (existing.isPresent()) {
             log.info("offer document already generated for {} — skipping", applicationId);
-            return;
+            return existing.get().getSha256();
         }
         byte[] pdf = renderPlaceholderPdf();
-        offerDocuments.save(new OfferDocument(applicationId, pdf, sha256Hex(pdf), pdf.length));
+        String sha256 = sha256Hex(pdf);
+        offerDocuments.save(new OfferDocument(applicationId, pdf, sha256, pdf.length));
+        return sha256;
     }
 
     /** Renders a one-page PDF whose whole body is {@link #PLACEHOLDER_TEXT}. */

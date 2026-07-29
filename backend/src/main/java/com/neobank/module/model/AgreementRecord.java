@@ -166,6 +166,18 @@ public class AgreementRecord {
         this.signedAt = occurredAt;
     }
 
+    /**
+     * UC 07's wiring: the case has an envelope registered with the e-sign mock and is now
+     * awaiting the customer — {@code GENERATING → PENDING}, stamped with the CURRENT envelope
+     * and the window {@code SignatureEventService}/the expiry clock will judge it against.
+     */
+    public void markSentForSignature(String envelopeId, Instant sentAt, Instant expiresAt) {
+        this.status = AgreementStatus.PENDING;
+        this.envelopeId = envelopeId;
+        this.sentAt = sentAt;
+        this.expiresAt = expiresAt;
+    }
+
     public String getApplicationId() {
         return applicationId;
     }
