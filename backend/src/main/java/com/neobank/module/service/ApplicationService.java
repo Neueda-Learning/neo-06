@@ -143,11 +143,12 @@ public class ApplicationService {
                 return;
             }
 
-            // Accepted, or not yet gated: generate the placeholder agreement document, move the
-            // case to PENDING (awaiting the customer's signature) and tell the orchestrator so
-            // the journey advances — there is nothing left to wait for without a real e-sign
-            // provider to register an envelope with.
-            agreementDocuments.compose(applicationId);
+            // Accepted, or not yet gated: generate the agreement document, move the case to
+            // PENDING (awaiting the customer's signature) and tell the orchestrator so the
+            // journey advances — there is nothing left to wait for without a real e-sign provider
+            // to register an envelope with. See AgreementDocumentComposer.compose's javadoc for
+            // what it still cannot print (approvedLimit/apr/termsVersion) and why.
+            agreementDocuments.compose(applicationId, request.application());
             updateStatus(applicationId, AgreementStatus.PENDING);
             orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
                     "agreement document generated — case moved to PENDING");
