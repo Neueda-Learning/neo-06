@@ -1,15 +1,20 @@
 package com.neobank.module.controller;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.neobank.module.dto.ApplicantView;
 import com.neobank.module.dto.CaseDetailView;
+import com.neobank.module.dto.OverrideCommand;
 import com.neobank.module.dto.TimelineEntryView;
 import com.neobank.module.service.CaseService;
+import com.neobank.module.service.OverrideNotAllowedException;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -17,11 +22,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * UC02's HTTP surface: {@code GET /cases/{applicationId}} — the 200 shape, and the 404 that
  * {@link GlobalExceptionHandler} turns a {@link NoSuchElementException} into (AC7).
+ *
+ * <p>UC08's HTTP surface: {@code POST /cases/{applicationId}/override} — the override endpoint.</p>
  *
  * <p>Also UC03's: {@code GET /cases/{applicationId}/applicant} — always {@code 200}, even when
  * the service reports the orchestrator as unreachable (AC4).</p>
@@ -31,6 +39,9 @@ class CasesControllerTest {
 
     @Autowired
     private MockMvc mvc;
+
+    @Autowired
+    private ObjectMapper json;
 
     @MockBean
     private CaseService cases;
@@ -64,6 +75,52 @@ class CasesControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("ghost")));
     }
+
+    // ========== UC 08 — Override Case tests ==========
+
+    @Test
+    void overrideReturns200WithUpdatedCase() throws Exception {
+        CaseDetailView detail = new CaseDetailView(
+                "DECLINED", "agr-001", "2026-06-01", 2800, new java.math.BigDecimal("24.9"), 84,
+                "env-123", Instant.now(), Instant.now().plusSeconds(5 * 24 * 3600), null,
+                List.of());
+        given(cases.override(eq("app-1"), any(OverrideCommand.class))).willReturn(detail);
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "Customer confirmed by phone — not proceeding", "b.dimovski");
+
+        mvc.perform(post("/cases/app-1/override")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(cmd)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DECLINED"));
+    }
+
+    @Test
+    void overrideSignedCaseReturns409() throws Exception {
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "reason", "operator");
+        given(cases.override(eq("app-signed"), any(OverrideCommand.class)))
+                .willThrow(new OverrideNotAllowedException("SIGNED is never overridden — the contract is in force"));
+
+        mvc.perform(post("/cases/app-signed/override")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(cmd)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("SIGNED is never overridden — the contract is in force"));
+    }
+
+    @Test
+    void overrideUnknownCaseReturns404() throws Exception {
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "reason", "operator");
+        given(cases.override(eq("ghost"), any(OverrideCommand.class)))
+                .willThrow(new NoSuchElementException("no case ghost"));
+
+        mvc.perform(post("/cases/ghost/override")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(cmd)))
+                .andExpect(status().isNotFound());
+    }
+
+    // ========== UC 03 — View Applicant tests ==========
 
     @Test
     void applicantEndpointReturnsTheSidebarShape() throws Exception {

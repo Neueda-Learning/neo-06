@@ -2,16 +2,24 @@ package com.neobank.module.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.neobank.module.dto.OverrideCommand;
 import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.OrchestratorApplicationClient;
+import com.neobank.module.integrations.orchestrator.OrchestratorClient;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.AgreementStatusHistory;
+import com.neobank.module.model.Decision;
 import com.neobank.module.repository.AgreementRecordRepository;
 import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import com.neobank.module.repository.OverrideLogRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -24,11 +32,15 @@ import org.springframework.web.client.RestClientException;
 /**
  * UC02 — Review Agreement. No Spring, no database: the two repositories are mocked, so this pins
  * exactly what the doc's acceptance criteria require without needing a running app.
+ *
+ * <p>UC08 — Override Case: the ONE permitted mutation outside the lifecycle.</p>
  */
 class CaseServiceTest {
 
     private AgreementRecordRepository agreementRecords;
     private AgreementStatusHistoryRepository history;
+    private OverrideLogRepository overrideLogs;
+    private OrchestratorClient orchestrator;
     private OrchestratorApplicationClient orchestratorApplications;
     private CaseService service;
 
@@ -36,8 +48,10 @@ class CaseServiceTest {
     void setUp() {
         agreementRecords = mock(AgreementRecordRepository.class);
         history = mock(AgreementStatusHistoryRepository.class);
+        overrideLogs = mock(OverrideLogRepository.class);
+        orchestrator = mock(OrchestratorClient.class);
         orchestratorApplications = mock(OrchestratorApplicationClient.class);
-        service = new CaseService(agreementRecords, history, orchestratorApplications);
+        service = new CaseService(agreementRecords, history, overrideLogs, orchestrator, orchestratorApplications);
     }
 
     @Test
@@ -115,6 +129,148 @@ class CaseServiceTest {
         when(history.findByApplicationIdOrderByOccurredAtAsc("app-9")).thenReturn(List.of());
 
         assertThat(service.getCase("app-9").termsVersion()).isEqualTo("2026-06-01");
+    }
+
+    // ========== UC 08 — Override Case tests ==========
+
+    @Test
+    void overrideWithoutReasonIsRejected() {
+        OverrideCommand cmd = new OverrideCommand("DECLINED", null, "operator");
+
+        assertThatThrownBy(() -> service.override("app-1", cmd))
+                .isInstanceOf(OverrideNotAllowedException.class)
+                .hasMessageContaining("reason is mandatory");
+    }
+
+    @Test
+    void overrideWithoutOperatorIsRejected() {
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "some reason", null);
+
+        assertThatThrownBy(() -> service.override("app-1", cmd))
+                .isInstanceOf(OverrideNotAllowedException.class)
+                .hasMessageContaining("operator is mandatory");
+    }
+
+    @Test
+    void overrideToSignedIsRejected() {
+        OverrideCommand cmd = new OverrideCommand("SIGNED", "reason", "operator");
+
+        assertThatThrownBy(() -> service.override("app-1", cmd))
+                .isInstanceOf(OverrideNotAllowedException.class)
+                .hasMessageContaining("SIGNED is never a legal override target");
+    }
+
+    @Test
+    void overrideUnknownCaseReturns404() {
+        when(agreementRecords.findById("ghost")).thenReturn(Optional.empty());
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "reason", "operator");
+
+        assertThatThrownBy(() -> service.override("ghost", cmd))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void overrideSignedCaseReturns409WithExactMessage() {
+        // AC 3: SIGNED cases → 409, exact message
+        AgreementRecord signed = new AgreementRecord("app-signed", AgreementStatus.SIGNED);
+        when(agreementRecords.findById("app-signed")).thenReturn(Optional.of(signed));
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "reason", "operator");
+
+        assertThatThrownBy(() -> service.override("app-signed", cmd))
+                .isInstanceOf(OverrideNotAllowedException.class)
+                .hasMessage("SIGNED is never overridden — the contract is in force");
+    }
+
+    @Test
+    void overridePendingToDeclinedSucceeds() {
+        AgreementRecord pending = new AgreementRecord("app-1", AgreementStatus.PENDING,
+                "env-123");
+        when(agreementRecords.findById("app-1")).thenReturn(Optional.of(pending));
+        when(agreementRecords.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(overrideLogs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.findByApplicationIdOrderByOccurredAtAsc("app-1")).thenReturn(List.of());
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "Customer confirmed by phone — not proceeding", "b.dimovski");
+
+        var result = service.override("app-1", cmd);
+
+        assertThat(result.status()).isEqualTo("DECLINED");
+        verify(overrideLogs).save(any());
+        verify(history).save(any());
+        verify(orchestrator).applicationStatusUpdate(eq("app-1"), eq(Decision.REJECTED), any());
+    }
+
+    @Test
+    void overrideExpiredToDeclinedRemovesFromQueue() {
+        // AC 6: Abandoning Tom's EXPIRED case to DECLINED removes it from the queue
+        AgreementRecord expired = new AgreementRecord("app-expired", AgreementStatus.EXPIRED,
+                "env-456");
+        when(agreementRecords.findById("app-expired")).thenReturn(Optional.of(expired));
+        when(agreementRecords.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(overrideLogs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.findByApplicationIdOrderByOccurredAtAsc("app-expired")).thenReturn(List.of());
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "Abandoning expired case", "operator");
+
+        var result = service.override("app-expired", cmd);
+
+        assertThat(result.status()).isEqualTo("DECLINED");
+    }
+
+    @Test
+    void overrideDeclinedToPendingRevivesCase() {
+        // AC 6: Reviving a DECLINED case to PENDING rotates the envelope and resets the clock
+        AgreementRecord declined = new AgreementRecord("app-declined", AgreementStatus.DECLINED,
+                "env-789");
+        when(agreementRecords.findById("app-declined")).thenReturn(Optional.of(declined));
+        when(agreementRecords.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(overrideLogs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.findByApplicationIdOrderByOccurredAtAsc("app-declined")).thenReturn(List.of());
+
+        OverrideCommand cmd = new OverrideCommand("PENDING", "Reviving wrongly declined case", "operator");
+
+        var result = service.override("app-declined", cmd);
+
+        assertThat(result.status()).isEqualTo("PENDING");
+        verify(orchestrator).applicationStatusUpdate(eq("app-declined"), eq(Decision.REFERRED), any());
+    }
+
+    @Test
+    void overrideIdempotentReplayReturnsSameResult() {
+        AgreementRecord declined = new AgreementRecord("app-already-declined", AgreementStatus.DECLINED);
+        when(agreementRecords.findById("app-already-declined")).thenReturn(Optional.of(declined));
+        when(history.findByApplicationIdOrderByOccurredAtAsc("app-already-declined")).thenReturn(List.of());
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "Already declined", "operator");
+
+        var result = service.override("app-already-declined", cmd);
+
+        assertThat(result.status()).isEqualTo("DECLINED");
+        // No writes on replay
+        verify(overrideLogs, never()).save(any());
+        verify(history, never()).save(any());
+        verify(orchestrator, never()).applicationStatusUpdate(any(), any(), any());
+    }
+
+    @Test
+    void overrideGeneratesLocalManualCallback() {
+        // AC 5: callback with status local-manual
+        AgreementRecord pending = new AgreementRecord("app-callback", AgreementStatus.PENDING, "env-xxx");
+        when(agreementRecords.findById("app-callback")).thenReturn(Optional.of(pending));
+        when(agreementRecords.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(overrideLogs.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(history.findByApplicationIdOrderByOccurredAtAsc("app-callback")).thenReturn(List.of());
+
+        OverrideCommand cmd = new OverrideCommand("DECLINED", "Manual override", "operator");
+
+        service.override("app-callback", cmd);
+
+        verify(orchestrator).applicationStatusUpdate(eq("app-callback"), eq(Decision.REJECTED), any());
     }
 
     // --- UC03 — View Applicant -------------------------------------------------------------

@@ -14,3 +14,5 @@ databaseChangeLog:
       file: db/changelog/changes/004-add-agreement-terms-columns.yaml
   - include:
       file: db/changelog/changes/005-create-offer-document.yaml
+  - include:
+      file: db/changelog/changes/006-create-override-log.yaml
