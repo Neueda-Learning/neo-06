@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppShell, Button, SideBrand, SideNav, StatusPill } from './design-system';
 import RequestsScreen from './components/RequestsScreen.jsx';
+import EsignMockPanel from './components/EsignMockPanel.jsx';
 import { api } from './api.js';
 
 const POLL_MS = 2000;
@@ -9,16 +10,16 @@ const HEALTH_MS = 10000;
 /**
  * The screens in the side menu.
  *
- * ⚠️ One real screen and three placeholders — the placeholders are there so the menu shows you
- * where your own screens go, and they are `disabled` so nobody clicks into nothing. Replace them
- * with what your business topic actually needs; the operator UI is a graded deliverable, and a
- * single read-only list is not one.
+ * ⚠️ One real screen, one UC 07 admin screen, and two placeholders — the placeholders are
+ * there so the menu shows you where your own screens go, and they are `disabled` so nobody
+ * clicks into nothing. Replace them with what your business topic actually needs; the operator
+ * UI is a graded deliverable, and a single read-only list is not one.
  */
 const SCREENS = [
   { id: 'applications', label: 'Applications' },
   { id: 'cases', label: 'Cases', hint: 'your own table', disabled: true },
   { id: 'overrides', label: 'Overrides', hint: 'operator actions', disabled: true },
-  { id: 'settings', label: 'Settings', hint: 'reference data', disabled: true },
+  { id: 'settings', label: 'Settings', hint: 'e-sign mock dials' },
 ];
 
 /**
@@ -99,6 +100,7 @@ export default function App() {
       {screen === 'applications' && (
         <RequestsScreen requests={requests} error={error} info={info} />
       )}
+      {screen === 'settings' && <EsignMockPanel />}
     </AppShell>
   );
 }

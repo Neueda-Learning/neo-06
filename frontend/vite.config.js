@@ -25,6 +25,8 @@ export default defineConfig({
       // This module's own read surface: GET /cases/{id} (UC02), GET /cases/{id}/applicant
       // (UC03) — same-origin here too, so `npm run dev` behaves like the built nginx image.
       '/cases': { target: BACKEND, changeOrigin: true },
+      // UC 07's admin panel proxy: GET/PUT /esign/config.
+      '/esign': { target: BACKEND, changeOrigin: true },
     },
   },
 });

@@ -9,9 +9,13 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Lets this service's React UI (its nginx container, or the Vite dev server) call the API.
  *
  * <p><b>Patterns, not a fixed list.</b> The browser sends an {@code Origin} header on every
- * POST, and Spring answers {@code 403 Invalid CORS request} if that origin is not allowed —
- * so a hard-coded port breaks the UI as soon as the stack runs on a different one. Same-origin
- * GETs send no {@code Origin}, so it fails only on writes and passes every curl check.
+ * write, and Spring answers {@code 403 Invalid CORS request} if that origin OR that method is
+ * not allowed — so a hard-coded port breaks the UI as soon as the stack runs on a different one,
+ * and a write verb missing from {@code allowedMethods} breaks only that one screen while every
+ * curl check (no {@code Origin} header) keeps passing. UC 07's {@code PUT /esign/config} is
+ * exactly that: {@code PUT} wasn't in this list until the panel needed it.</p>
+ *
+ * <p>Same-origin GETs send no {@code Origin}, so they never hit this check at all.</p>
  *
  * <p>This is a single-user local stack with no auth, so any localhost port is fine.</p>
  */
@@ -25,7 +29,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOriginPatterns(allowedOriginPatterns)
-                .allowedMethods("GET", "POST", "OPTIONS")
+                .allowedMethods("GET", "POST", "PUT", "OPTIONS")
                 .allowedHeaders("*");
     }
 }

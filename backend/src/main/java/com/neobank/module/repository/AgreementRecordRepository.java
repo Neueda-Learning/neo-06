@@ -2,13 +2,13 @@ package com.neobank.module.repository;
 
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.data.domain.Pageable;
 
 /**
  * Spring Data writes the implementation from these method names.
@@ -61,4 +61,10 @@ public interface AgreementRecordRepository extends JpaRepository<AgreementRecord
      * {@code pageable}'s page size — see {@code QueueService}.
      */
     List<AgreementRecord> findByStatusOrderBySentAtAsc(AgreementStatus status, Pageable pageable);
+
+    /**
+     * UC 07's expiry sweep ({@code ExpiryClockService}): every case still in {@code status} whose
+     * clock has already passed {@code now} — the set a real scheduler flips to {@code EXPIRED}.
+     */
+    List<AgreementRecord> findByStatusAndExpiresAtBefore(AgreementStatus status, Instant now);
 }

@@ -9,8 +9,23 @@ public interface EsignMockClient {
 
     /**
      * @param applicationId the case being (re)sent — real providers would need it to correlate
-     *                      their own callback; the in-memory stub ignores it
-     * @return a fresh envelope id, e.g. {@code "env-8f14e45f"} — never the same value twice
+     *                      their own callback; the in-memory stub uses it to know which case to
+     *                      post the auto-outcome back to
+     * @return a fresh envelope id, e.g. {@code "env-8f14e45f"} (never the same value twice), and
+     *         the expiry window (in seconds) this envelope should give the case — UC 07's
+     *         {@code demoExpirySeconds} dial if set, otherwise the default seed
      */
-    String registerEnvelope(String applicationId);
+    EnvelopeRegistration registerEnvelope(String applicationId);
+
+    /**
+     * @param envelopeId    the fresh envelope id
+     * @param expirySeconds how long, from now, this envelope's case may stay PENDING before the
+     *                      expiry clock takes it — the caller ({@link
+     *                      com.neobank.module.service.EnvelopeService}) adds this to its own
+     *                      {@code sentAt} to get {@code expiresAt}, keeping that column's ownership
+     *                      exactly where the entity model already puts it
+     */
+    record EnvelopeRegistration(String envelopeId, long expirySeconds) {
+    }
 }
+

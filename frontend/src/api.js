@@ -37,4 +37,7 @@ export const api = {
   listApplications: () => request('/api/v1/applications'),
   getApplication: (id) => request(`/api/v1/applications/${id}`),
   getApplicant: (id) => request(`/cases/${id}/applicant`),
+  getEsignConfig: () => request('/esign/config'),
+  putEsignConfig: (dials) =>
+    request('/esign/config', { method: 'PUT', body: JSON.stringify(dials) }),
 };
