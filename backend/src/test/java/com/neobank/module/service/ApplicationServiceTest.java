@@ -3,6 +3,7 @@ package com.neobank.module.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,19 +22,21 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * UC 00's two halves, tested separately: {@link ApplicationService#processApplicationAsync} (the
  * durable row + idempotency + hand-off) and {@link ApplicationService#decide} (the one decision
  * this use case owns — the consent gate).
  *
- * <p>No Spring, no database, no HTTP — same style as the placeholder test it replaces: the
- * service takes a request and calls two collaborators, so each test is a handful of lines.</p>
+ * <p>No Spring, no database, no HTTP — the service takes a request and calls two collaborators, so
+ * each test is a handful of lines.</p>
  */
 class ApplicationServiceTest {
 
     private AgreementRecordRepository agreementRecords;
     private OrchestratorClient orchestrator;
+    private AgreementDocumentComposer agreementDocuments;
     private ApplicationService service;
 
     @BeforeEach
@@ -41,7 +44,8 @@ class ApplicationServiceTest {
         agreementRecords = mock(AgreementRecordRepository.class);
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
-        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator);
+        agreementDocuments = mock(AgreementDocumentComposer.class);
+        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator, agreementDocuments);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
     }
 
@@ -68,6 +72,11 @@ class ApplicationServiceTest {
         verify(agreementRecords).save(saved.capture());
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
+
+        // Not declined (no consents block yet), so the placeholder agreement PDF is generated,
+        // the case moves toward PENDING, and the orchestrator is told ACCEPTED.
+        verify(agreementDocuments).compose("SIM-01");
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.ACCEPTED), any());
     }
 
     @Test
@@ -83,6 +92,20 @@ class ApplicationServiceTest {
     }
 
     @Test
+    void aRaceThatSlipsPastExistsByIdIsCaughtByTheUniqueKeyAndSkipsTheDecision() {
+        // Two /execute calls for the same id can both see existsById == false before either has
+        // committed. The primary key is the real guarantee; this proves the loser backs off rather
+        // than dispatching a second decision.
+        when(agreementRecords.existsById("SIM-07")).thenReturn(false);
+        doThrow(new DataIntegrityViolationException("duplicate key"))
+                .when(agreementRecords).save(any(AgreementRecord.class));
+
+        service.processApplicationAsync(request("SIM-07", null));
+
+        verifyNoInteractions(orchestrator);
+    }
+
+    @Test
     void consentGateFalseDeclinesTheCaseAndReportsRejected() {
         AgreementRecord row = new AgreementRecord("SIM-03", AgreementStatus.GENERATING);
         when(agreementRecords.findById("SIM-03")).thenReturn(Optional.of(row));
@@ -90,24 +113,38 @@ class ApplicationServiceTest {
         service.decide(request("SIM-03", false));
 
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.DECLINED);
+        // Regression guard: updateStatus's @Transactional does nothing on a self-invoked call
+        // (bypasses Spring's proxy), so the mutation must be persisted with an explicit save() —
+        // a mock can't catch a missing flush the way the real database did.
+        verify(agreementRecords).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-03"), eq(Decision.REJECTED), any());
     }
 
     @Test
-    void consentAcceptedLeavesTheRowGeneratingAndReportsNothingYet() {
-        // The happy path (PDF, envelope, PENDING) is the decision engine's job, not UC 00's —
-        // so accepted consent has nothing more to do here yet.
+    void consentAcceptedGeneratesTheDocumentMovesToPendingAndReportsAccepted() {
+        AgreementRecord row = new AgreementRecord("SIM-04", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-04")).thenReturn(Optional.of(row));
+
         service.decide(request("SIM-04", true));
 
-        verifyNoInteractions(orchestrator);
-        verify(agreementRecords, never()).findById(any());
+        verify(agreementDocuments).compose("SIM-04");
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        verify(agreementRecords).save(row);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
     }
 
     @Test
-    void aMissingConsentsBlockIsTreatedAsNotYetGated() {
+    void aMissingConsentsBlockIsTreatedTheSameAsAcceptedForNow() {
+        // No consents block yet (not the same as an explicit decline): treated like accepted —
+        // the document is generated and the case moves to PENDING.
+        AgreementRecord row = new AgreementRecord("SIM-05", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-05")).thenReturn(Optional.of(row));
+
         service.decide(request("SIM-05", null));
 
-        verifyNoInteractions(orchestrator);
+        verify(agreementDocuments).compose("SIM-05");
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.ACCEPTED), any());
     }
 
     @Test

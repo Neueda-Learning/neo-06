@@ -20,10 +20,14 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * <h2>UC 00 · Process Application — the durable row, its idempotency, and the async hand-off.</h2>
  *
- * <p>Deciding anything beyond the consent gate (generating the PDF, registering the e-sign
- * envelope, moving {@code GENERATING → PENDING}, the happy-path callback) is the decision engine —
- * a later use case, and explicitly out of scope for this one (see the UC 00 brief's "Out of
- * scope"). What belongs here is exactly what the brief's acceptance criteria ask for:</p>
+ * <p>Deciding anything beyond the consent gate (registering a REAL e-sign envelope, and the real
+ * numbers an {@code AgreementConfig} would produce) is the decision engine — a later use case,
+ * and explicitly out of scope for this one (see the UC 00 brief's "Out of scope"). What IS done
+ * here, once the consent gate has passed: UC05's placeholder agreement PDF is generated (via
+ * {@link AgreementDocumentComposer}), the row moves {@code GENERATING → PENDING}, and the
+ * orchestrator is told {@code ACCEPTED} so the journey advances — there is nothing left to wait
+ * for without a real e-sign provider. What belongs here is exactly what the brief's acceptance
+ * criteria ask for, plus that:</p>
  *
  * <ol>
  *   <li>the {@link AgreementRecord} row exists, committed, BEFORE the {@code 202} is sent — so a
@@ -35,6 +39,10 @@ import org.springframework.transaction.annotation.Transactional;
  *       ({@code consents.termsAccepted} false → {@code DECLINED}, nothing generated, nothing
  *       sent) — runs off-thread, after the row is committed.</li>
  * </ol>
+ *
+ * <p>UC02 (Review Agreement) reads the fuller shape ({@code reference}, {@code termsVersion}, the
+ * limits, the timeline) back out — this service never populates those columns; only a later
+ * decision-engine use case does.</p>
  */
 @Service
 public class ApplicationService {
@@ -44,13 +52,16 @@ public class ApplicationService {
     private final Executor executor;
     private final AgreementRecordRepository agreementRecords;
     private final OrchestratorClient orchestrator;
+    private final AgreementDocumentComposer agreementDocuments;
 
     public ApplicationService(@Qualifier("applicationTaskExecutor") Executor executor,
                               AgreementRecordRepository agreementRecords,
-                              OrchestratorClient orchestrator) {
+                              OrchestratorClient orchestrator,
+                              AgreementDocumentComposer agreementDocuments) {
         this.executor = executor;
         this.agreementRecords = agreementRecords;
         this.orchestrator = orchestrator;
+        this.agreementDocuments = agreementDocuments;
     }
 
     /**
@@ -95,6 +106,10 @@ public class ApplicationService {
             agreementRecords.save(new AgreementRecord(applicationId, AgreementStatus.GENERATING));
             return true;
         } catch (DataIntegrityViolationException raced) {
+            // Lost the race to a concurrent /execute for the same applicationId — its insert won,
+            // ours is the duplicate. One row either way.
+            log.info("Concurrent /execute for {} — unique constraint caught the duplicate",
+                    applicationId);
             return false;
         }
     }
@@ -107,29 +122,35 @@ public class ApplicationService {
      * decision starts only after the row is committed" is the whole point of splitting the two
      * methods.</p>
      *
-     * <p>Only the consent gate is decided here (see class javadoc). Everything else the happy
-     * path needs — PDF generation, envelope registration, the {@code GENERATING → PENDING} move,
-     * and the callback that goes with it — is left for the decision engine use case; the row
-     * simply stays {@code GENERATING} until that lands.</p>
+     * <p>Only the consent gate is decided here (see class javadoc): {@code termsAccepted} false
+     * moves the row to {@link AgreementStatus#DECLINED} and reports {@code REJECTED} — nothing
+     * is generated for a case that never gets one. Otherwise (accepted, or not yet gated) this
+     * generates UC05's placeholder agreement PDF, moves the row to
+     * {@link AgreementStatus#PENDING}, and reports {@code ACCEPTED} — the REAL numbers (a real
+     * e-sign envelope, an {@code AgreementConfig}-priced offer) are still the decision engine use
+     * case's job.</p>
      */
     void decide(ApplicationRequest request) {
         String applicationId = request.applicationId();
         try {
-            Application application = request.application();
-            Application.Consents consents = application == null ? null : application.consents();
+            Application.Consents consents = request.application().consents();
             Boolean termsAccepted = consents == null ? null : consents.termsAccepted();
 
             if (Boolean.FALSE.equals(termsAccepted)) {
                 updateStatus(applicationId, AgreementStatus.DECLINED);
                 orchestrator.applicationStatusUpdate(applicationId, Decision.REJECTED,
-                        "consent not accepted — no agreement generated");
+                        "consent not given: termsAccepted=false");
                 return;
             }
 
-            // Consent gate passed (or the field was absent — nothing to gate on yet). The
-            // decision engine (PDF + envelope + PENDING + its callback) is out of scope for UC 00.
-            log.info("GENERATING {} — awaiting the decision engine (not yet implemented)",
-                    applicationId);
+            // Accepted, or not yet gated: generate the placeholder agreement document, move the
+            // case to PENDING (awaiting the customer's signature) and tell the orchestrator so
+            // the journey advances — there is nothing left to wait for without a real e-sign
+            // provider to register an envelope with.
+            agreementDocuments.compose(applicationId);
+            updateStatus(applicationId, AgreementStatus.PENDING);
+            orchestrator.applicationStatusUpdate(applicationId, Decision.ACCEPTED,
+                    "agreement document generated — case moved to PENDING");
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
             // nothing to explain it. Refer it to a human and say why.
@@ -139,9 +160,16 @@ public class ApplicationService {
         }
     }
 
-    @Transactional
+    // Deliberately not relying on @Transactional + dirty-checking here: decide() calls this via
+    // self-invocation (this.updateStatus(...)), which bypasses Spring's proxy entirely, so an
+    // @Transactional on this method would do nothing — the record would be loaded, mutated, and
+    // then simply discarded, detached, with the change never flushed. An explicit save() goes
+    // through the repository's own (proxied) transaction and persists regardless of the caller.
     void updateStatus(String applicationId, AgreementStatus status) {
-        agreementRecords.findById(applicationId).ifPresent(record -> record.changeStatus(status));
+        agreementRecords.findById(applicationId).ifPresent(record -> {
+            record.changeStatus(status);
+            agreementRecords.save(record);
+        });
     }
 
     /** Everything this module holds, newest first — what its own UI reads until UC 01 replaces it. */

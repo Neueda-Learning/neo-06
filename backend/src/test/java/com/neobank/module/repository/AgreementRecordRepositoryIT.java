@@ -45,8 +45,7 @@ class AgreementRecordRepositoryIT {
 
     @Test
     void schemaValidatesAndStartsEmpty() {
-        // Reaching here proves Liquibase applied 002 (and 003's drop) and ddl-auto=validate
-        // passed on real MySQL.
+        // Reaching here proves Liquibase applied 002/003/004 and ddl-auto=validate passed on real MySQL.
         assertThat(agreementRecords.findAll()).isEmpty();
     }
 

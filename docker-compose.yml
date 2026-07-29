@@ -98,7 +98,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-5173}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   mysql-data:

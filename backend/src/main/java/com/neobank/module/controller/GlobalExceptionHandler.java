@@ -1,8 +1,10 @@
 package com.neobank.module.controller;
 
+import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -15,14 +17,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * predictable body instead of a stack trace — {@code server.error.include-*=never} in
  * {@code application.yml} makes sure nothing leaks past this class.
  *
- * <p>Add a handler per exception your own code throws. A lookup that finds nothing, for example:</p>
- *
- * <pre>{@code
- * @ExceptionHandler(NoSuchElementException.class)
- * public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
- *     return error(HttpStatus.NOT_FOUND, ex.getMessage());
- * }
- * }</pre>
+ * <p>Add a handler per exception your own code throws — {@link #handleNotFound} and
+ * {@link #handleConflict} below are UC 06's.</p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -54,6 +50,24 @@ public class GlobalExceptionHandler {
         int newline = message == null ? -1 : message.indexOf('\n');
         return error(HttpStatus.BAD_REQUEST,
                 "malformed request body: " + (newline > 0 ? message.substring(0, newline) : message));
+    }
+
+    /**
+     * UC 06's 404: an {@code applicationId} on {@code /cases/{id}/signature-events} that this
+     * module has no row for.
+     */
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException ex) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /**
+     * UC 06's 409: the case exists but the signature event is out of turn — a stale envelope, a
+     * state other than {@code PENDING}, or a decision that contradicts one already made.
+     */
+    @ExceptionHandler(SignatureEventConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleConflict(SignatureEventConflictException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {

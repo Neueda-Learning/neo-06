@@ -13,15 +13,16 @@ import org.springframework.data.domain.Pageable;
  * Spring Data writes the implementation from these method names.
  *
  * <p>The primary key IS {@code applicationId} (see {@link AgreementRecord}), so
- * {@link #existsById} / {@link #findById} are the idempotency check UC 00 needs — no separate
- * lookup-by-application-id method is needed the way the placeholder's surrogate-id table required.</p>
+ * {@link JpaRepository#existsById} / {@link JpaRepository#findById} are already this module's
+ * idempotency check — no separate {@code existsBy...} method is needed.</p>
  */
 public interface AgreementRecordRepository extends JpaRepository<AgreementRecord, String> {
 
     /**
-     * Newest first — what the board will show. Tie-broken by {@code applicationId} since this
-     * table has no separate auto-increment id to settle same-second ties (see
-     * {@code DemoShowcaseRepository}'s note on why a tiebreak matters on real MySQL).
+     * Newest first — what the board shows. Tie-broken by {@code applicationId} itself: this table
+     * has no surrogate numeric id, and MySQL {@code TIMESTAMP} truncates to whole seconds, so
+     * same-second rows still need a deterministic order or the board would shuffle them between
+     * page loads.
      */
     List<AgreementRecord> findAllByOrderByCreatedAtDescApplicationIdDesc();
 
