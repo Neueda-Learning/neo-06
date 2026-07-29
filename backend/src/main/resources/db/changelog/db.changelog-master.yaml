@@ -16,3 +16,7 @@ databaseChangeLog:
       file: db/changelog/changes/005-create-offer-document.yaml
   - include:
       file: db/changelog/changes/006-create-esign-provider-config.yaml
+  - include:
+      file: db/changelog/changes/007-create-agreement-config.yaml
+  - include:
+      file: db/changelog/changes/008-create-override-log.yaml

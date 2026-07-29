@@ -1,0 +1,158 @@
+package com.neobank.module.service;
+
+import com.neobank.module.dto.OverrideRequest;
+import com.neobank.module.dto.QueueEntryView;
+import com.neobank.module.integrations.orchestrator.OrchestratorClient;
+import com.neobank.module.model.AgreementConfig;
+import com.neobank.module.model.AgreementRecord;
+import com.neobank.module.model.AgreementStatus;
+import com.neobank.module.model.AgreementStatusHistory;
+import com.neobank.module.model.Decision;
+import com.neobank.module.model.OverrideLog;
+import com.neobank.module.repository.AgreementConfigRepository;
+import com.neobank.module.repository.AgreementRecordRepository;
+import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import com.neobank.module.repository.OfferDocumentRepository;
+import com.neobank.module.repository.OverrideLogRepository;
+import java.time.Instant;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * <h2>UC 08 · Override Case — the operator's manual escape hatch.</h2>
+ *
+ * <p>See {@code module-06-agreement-management-docs/uc-08-override-case.md}. Legal moves only
+ * (build note): {@code PENDING -> DECLINED} (stop a live offer), {@code EXPIRED -> DECLINED}
+ * (abandon), {@code DECLINED -> PENDING} (revive — same envelope/clock reset as a resend).
+ * {@code SIGNED} is never a target and never a source (AC3, exact wording checkpoint). The blob
+ * and history are never edited, only appended to (AC7).</p>
+ */
+@Service
+public class OverrideService {
+
+    private static final Logger log = LoggerFactory.getLogger(OverrideService.class);
+
+    /** AC3's exact wording — the checkpoint test asserts this literal string. */
+    private static final String SIGNED_MESSAGE = "no override may unsign a contract";
+
+    private static final Set<AgreementStatus> LEGAL_TARGETS =
+            Set.of(AgreementStatus.PENDING, AgreementStatus.DECLINED);
+
+    private final AgreementRecordRepository agreementRecords;
+    private final AgreementConfigRepository agreementConfigs;
+    private final AgreementStatusHistoryRepository history;
+    private final OverrideLogRepository overrideLogs;
+    private final OfferDocumentRepository offerDocuments;
+    private final ApplicantService applicants;
+    private final EsignProvider esignProvider;
+    private final OrchestratorClient orchestrator;
+
+    public OverrideService(AgreementRecordRepository agreementRecords,
+                           AgreementConfigRepository agreementConfigs,
+                           AgreementStatusHistoryRepository history,
+                           OverrideLogRepository overrideLogs,
+                           OfferDocumentRepository offerDocuments,
+                           ApplicantService applicants,
+                           EsignProvider esignProvider,
+                           OrchestratorClient orchestrator) {
+        this.agreementRecords = agreementRecords;
+        this.agreementConfigs = agreementConfigs;
+        this.history = history;
+        this.overrideLogs = overrideLogs;
+        this.offerDocuments = offerDocuments;
+        this.applicants = applicants;
+        this.esignProvider = esignProvider;
+        this.orchestrator = orchestrator;
+    }
+
+    @Transactional
+    public QueueEntryView override(String applicationId, OverrideRequest request) {
+        AgreementStatus newStatus = parseTarget(request.newStatus());
+
+        AgreementRecord record = agreementRecords.findById(applicationId)
+                .orElseThrow(() -> new NoSuchElementException("no case " + applicationId));
+        AgreementStatus oldStatus = record.getStatus();
+
+        if (oldStatus == AgreementStatus.SIGNED) {
+            throw new CaseConflictException(SIGNED_MESSAGE);
+        }
+        if (!isLegalMove(oldStatus, newStatus)) {
+            throw new CaseConflictException(
+                    "cannot override " + applicationId + " from " + oldStatus + " to " + newStatus);
+        }
+
+        Instant now = Instant.now();
+        if (newStatus == AgreementStatus.PENDING) {
+            // Revive: same mechanics as a resend (AC6) — fresh envelope, fresh clock.
+            EnvelopeRegistration registration = esignProvider.registerEnvelope(applicationId,
+                    documentShaFor(applicationId), signerNameFor(applicationId));
+            AgreementConfig config = agreementConfigs.findTopByOrderByVersionDesc()
+                    .orElseThrow(() -> new IllegalStateException("no AgreementConfig seeded"));
+            Instant expiresAt = now.plusSeconds((long) config.getExpiryDays() * 24 * 3600);
+            record.markSentForSignature(registration.envelopeId(), now, expiresAt);
+        } else {
+            record.changeStatus(newStatus);
+        }
+        agreementRecords.save(record);
+
+        overrideLogs.save(new OverrideLog(applicationId, oldStatus, newStatus, request.reason(),
+                request.operator(), now));
+        history.save(new AgreementStatusHistory(applicationId, oldStatus, newStatus, "OVERRIDE",
+                request.operator(), now));
+
+        // AC5: a fresh callback carrying "local-manual" and the outcome word for the new state —
+        // there is no Decision value for a human override, so it is encoded in the comment.
+        Decision decision = newStatus == AgreementStatus.DECLINED ? Decision.REJECTED : Decision.ACCEPTED;
+        String outcome = newStatus == AgreementStatus.DECLINED ? "declined" : "application-manual";
+        orchestrator.applicationStatusUpdate(applicationId, decision,
+                "local-manual: " + outcome + " (override by " + request.operator() + ")");
+
+        log.info("OVERRIDE {} {} -> {} by {}", applicationId, oldStatus, newStatus,
+                request.operator());
+
+        return QueueEntryView.of(record,
+                history.countByApplicationIdAndToStatus(applicationId, AgreementStatus.PENDING),
+                now);
+    }
+
+    private static AgreementStatus parseTarget(String newStatus) {
+        AgreementStatus parsed;
+        try {
+            parsed = AgreementStatus.valueOf(newStatus.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("newStatus must be PENDING or DECLINED");
+        }
+        if (!LEGAL_TARGETS.contains(parsed)) {
+            throw new IllegalArgumentException("newStatus must be PENDING or DECLINED");
+        }
+        return parsed;
+    }
+
+    private static boolean isLegalMove(AgreementStatus from, AgreementStatus to) {
+        if (to == AgreementStatus.DECLINED) {
+            return from == AgreementStatus.PENDING || from == AgreementStatus.EXPIRED;
+        }
+        // to == PENDING (revive)
+        return from == AgreementStatus.DECLINED;
+    }
+
+    private String documentShaFor(String applicationId) {
+        return offerDocuments.findByApplicationId(applicationId)
+                .map(doc -> doc.getSha256())
+                .orElse(null);
+    }
+
+    private String signerNameFor(String applicationId) {
+        try {
+            return applicants.getApplicant(applicationId).fullName();
+        } catch (OrchestratorUnavailableException e) {
+            log.warn("could not fetch signer name for {} while reviving: {}", applicationId,
+                    e.getMessage());
+            return null;
+        }
+    }
+}

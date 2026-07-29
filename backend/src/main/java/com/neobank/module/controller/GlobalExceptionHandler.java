@@ -1,5 +1,7 @@
 package com.neobank.module.controller;
 
+import com.neobank.module.service.CaseConflictException;
+import com.neobank.module.service.OrchestratorUnavailableException;
 import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -68,6 +70,25 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(SignatureEventConflictException.class)
     public ResponseEntity<Map<String, Object>> handleConflict(SignatureEventConflictException ex) {
         return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** UC 04/05/08's 409s: a real case, an action that is simply out of turn right now. */
+    @ExceptionHandler(CaseConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleCaseConflict(CaseConflictException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /** A caller-supplied value is not one this endpoint accepts — e.g. UC 08's {@code newStatus}. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** UC 03 AC4: the orchestrator proxy could not be reached — retryable, not this case's fault. */
+    @ExceptionHandler(OrchestratorUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleOrchestratorUnavailable(
+            OrchestratorUnavailableException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {

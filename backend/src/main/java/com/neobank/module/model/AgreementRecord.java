@@ -170,12 +170,31 @@ public class AgreementRecord {
      * UC 07's wiring: the case has an envelope registered with the e-sign mock and is now
      * awaiting the customer — {@code GENERATING → PENDING}, stamped with the CURRENT envelope
      * and the window {@code SignatureEventService}/the expiry clock will judge it against.
+     *
+     * <p>Reused for every later (re)send — UC 04's resend and UC 08's DECLINED → PENDING revive
+     * both land the case back on {@code PENDING} with a fresh envelope and clock the same way the
+     * original send did; the doc's own state diagram draws all three as the same edge.</p>
      */
     public void markSentForSignature(String envelopeId, Instant sentAt, Instant expiresAt) {
         this.status = AgreementStatus.PENDING;
         this.envelopeId = envelopeId;
         this.sentAt = sentAt;
         this.expiresAt = expiresAt;
+    }
+
+    /**
+     * Pins the terms a case is generated under — {@code reference}, {@code termsVersion}, the
+     * priced limits — once, at GENERATING, from the {@code AgreementConfig} version in force and
+     * the application's requested figures. Never called again for this row: UC 02 AC6 requires
+     * the STORED terms to survive a later config change untouched.
+     */
+    public void pinTerms(String reference, String termsVersion, Integer approvedLimit,
+            BigDecimal apr, Integer minPaymentGbp) {
+        this.reference = reference;
+        this.termsVersion = termsVersion;
+        this.approvedLimit = approvedLimit;
+        this.apr = apr;
+        this.minPaymentGbp = minPaymentGbp;
     }
 
     public String getApplicationId() {

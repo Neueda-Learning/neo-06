@@ -14,12 +14,16 @@ import com.neobank.module.dto.EsignConfigView;
 import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.ApplicationRequest;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
+import com.neobank.module.model.AgreementConfig;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.Decision;
 import com.neobank.module.model.EsignMode;
 import com.neobank.module.model.EsignOutcome;
+import com.neobank.module.repository.AgreementConfigRepository;
 import com.neobank.module.repository.AgreementRecordRepository;
+import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +42,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 class ApplicationServiceTest {
 
     private AgreementRecordRepository agreementRecords;
+    private AgreementConfigRepository agreementConfigs;
+    private AgreementStatusHistoryRepository history;
     private OrchestratorClient orchestrator;
     private AgreementDocumentComposer agreementDocuments;
     private EsignProvider esignProvider;
@@ -46,13 +52,19 @@ class ApplicationServiceTest {
     @BeforeEach
     void setUp() {
         agreementRecords = mock(AgreementRecordRepository.class);
+        agreementConfigs = mock(AgreementConfigRepository.class);
+        history = mock(AgreementStatusHistoryRepository.class);
         orchestrator = mock(OrchestratorClient.class);
         // Runnable::run — the hand-off happens inline, so there is nothing to wait for.
         agreementDocuments = mock(AgreementDocumentComposer.class);
         esignProvider = mock(EsignProvider.class);
-        service = new ApplicationService(Runnable::run, agreementRecords, orchestrator,
-                agreementDocuments, esignProvider);
+        service = new ApplicationService(Runnable::run, agreementRecords, agreementConfigs,
+                history, orchestrator, agreementDocuments, esignProvider);
         when(agreementRecords.save(any(AgreementRecord.class))).thenAnswer(call -> call.getArgument(0));
+        // Default: version 1, 5-day expiry, 3%/£5 minimum payment, 24.9% APR — most tests don't care.
+        when(agreementConfigs.findTopByOrderByVersionDesc()).thenReturn(Optional.of(
+                new AgreementConfig(1, "2026-06-01", 5, new BigDecimal("3.00"), 5,
+                        new BigDecimal("24.9"))));
         // Default: a fresh envelope, INSTANT/SIGN, no demo expiry override — most tests don't care.
         when(esignProvider.registerEnvelope(any(), any(), any())).thenReturn(new EnvelopeRegistration(
                 "env-test", new EsignConfigView(EsignMode.INSTANT, 0, EsignOutcome.SIGN, null)));
@@ -82,9 +94,9 @@ class ApplicationServiceTest {
         assertThat(saved.getValue().getApplicationId()).isEqualTo("SIM-01");
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
 
-        // Not declined (no consents block yet), so the placeholder agreement PDF is generated,
-        // the case moves toward PENDING, and the orchestrator is told ACCEPTED.
-        verify(agreementDocuments).compose("SIM-01");
+        // Not declined (no consents block yet), so the agreement PDF is generated, the case
+        // moves toward PENDING, and the orchestrator is told ACCEPTED.
+        verify(agreementDocuments).compose(eq("SIM-01"), any());
         verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.ACCEPTED), any());
     }
 
@@ -136,9 +148,16 @@ class ApplicationServiceTest {
 
         service.decide(request("SIM-04", true));
 
-        verify(agreementDocuments).compose("SIM-04");
+        verify(agreementDocuments).compose(eq("SIM-04"), any());
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
-        verify(agreementRecords).save(row);
+        assertThat(row.getReference()).isNotBlank();
+        assertThat(row.getTermsVersion()).isEqualTo("2026-06-01");
+        assertThat(row.getApprovedLimit()).isEqualTo(3000);
+        assertThat(row.getApr()).isEqualByComparingTo("24.9");
+        assertThat(row.getMinPaymentGbp()).isEqualTo(90);
+        // Two explicit saves: pinTerms (terms) and markSentForSignature (envelope) — see the
+        // self-invocation caveat documented on ApplicationService#updateStatus.
+        verify(agreementRecords, org.mockito.Mockito.times(2)).save(row);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
     }
 
@@ -149,7 +168,7 @@ class ApplicationServiceTest {
         // before the row is actually PENDING (see the class javadoc on sendForSignature).
         AgreementRecord row = new AgreementRecord("SIM-08", AgreementStatus.GENERATING);
         when(agreementRecords.findById("SIM-08")).thenReturn(Optional.of(row));
-        when(agreementDocuments.compose("SIM-08")).thenReturn("deadbeef");
+        when(agreementDocuments.compose(eq("SIM-08"), any())).thenReturn("deadbeef");
         EnvelopeRegistration registration = new EnvelopeRegistration("env-abc123",
                 new EsignConfigView(EsignMode.SILENT, 0, EsignOutcome.SIGN, 30));
         when(esignProvider.registerEnvelope("SIM-08", "deadbeef", "Maria Nowak"))
@@ -192,7 +211,7 @@ class ApplicationServiceTest {
 
         service.decide(request("SIM-05", null));
 
-        verify(agreementDocuments).compose("SIM-05");
+        verify(agreementDocuments).compose(eq("SIM-05"), any());
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
         verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.ACCEPTED), any());
     }

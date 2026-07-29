@@ -1,7 +1,10 @@
 package com.neobank.module.service;
 
 import com.neobank.module.dto.AgreementDocumentContent;
+import com.neobank.module.model.AgreementRecord;
+import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.OfferDocument;
+import com.neobank.module.repository.AgreementRecordRepository;
 import com.neobank.module.repository.OfferDocumentRepository;
 import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
@@ -17,33 +20,47 @@ import org.springframework.stereotype.Service;
  * execute-time, and streams those exact bytes back. That separation is what makes byte-identity
  * (inline vs. download, before vs. after signing, …) provable rather than just asserted.</p>
  *
- * <p>Still skipped: the consent-gate {@code 409} (there is no consent-gate concept yet) and the
- * per-status behaviour beyond "found → 200, not found → 404". An {@code applicationId} for which
- * nothing was ever generated — including one that was never {@code POST}ed to this module — is a
- * plain {@code 404}.</p>
+ * <p>An {@code applicationId} this module has never heard of is a plain {@code 404}. One this
+ * module HAS heard of, but for which no document was ever generated — the consent-gate declined it
+ * before generation ran — is a {@code 409}: the case is real, there is simply nothing to serve.</p>
  */
 @Service
 public class AgreementDocumentService {
 
     private final OfferDocumentRepository offerDocuments;
+    private final AgreementRecordRepository agreementRecords;
 
-    public AgreementDocumentService(OfferDocumentRepository offerDocuments) {
+    public AgreementDocumentService(OfferDocumentRepository offerDocuments,
+            AgreementRecordRepository agreementRecords) {
         this.offerDocuments = offerDocuments;
+        this.agreementRecords = agreementRecords;
     }
 
     /**
-     * @throws NoSuchElementException if no {@code OfferDocument} was ever generated for
-     *         {@code applicationId} — {@link com.neobank.module.controller.GlobalExceptionHandler}
-     *         turns that into a {@code 404}.
+     * @throws NoSuchElementException if this module has no case at all for {@code applicationId}
+     *         — a {@code 404}.
+     * @throws CaseConflictException if the case exists but the consent gate declined it before any
+     *         document was generated — a {@code 409}.
      */
     public AgreementDocumentContent getDocument(String applicationId) {
-        OfferDocument document = offerDocuments.findByApplicationId(applicationId)
+        var document = offerDocuments.findByApplicationId(applicationId);
+        if (document.isPresent()) {
+            return new AgreementDocumentContent(
+                    document.get().getPdfBlob(),
+                    "application/pdf",
+                    "agreement-" + applicationId + ".pdf");
+        }
+        AgreementRecord record = agreementRecords.findById(applicationId)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "no agreement document for applicationId " + applicationId));
-        return new AgreementDocumentContent(
-                document.getPdfBlob(),
-                "application/pdf",
-                "agreement-" + applicationId + ".pdf");
+                        "no agreement case for applicationId " + applicationId));
+        if (record.getStatus() == AgreementStatus.DECLINED) {
+            throw new CaseConflictException(
+                    "no document was generated for " + applicationId
+                            + " — the consent gate declined it before generation");
+        }
+        throw new NoSuchElementException(
+                "no agreement document for applicationId " + applicationId);
     }
 }
+
 

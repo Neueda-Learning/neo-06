@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.neobank.module.model.OfferDocument;
 import com.neobank.module.repository.OfferDocumentRepository;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Optional;
@@ -23,13 +24,16 @@ import org.mockito.ArgumentCaptor;
 
 /**
  * The write path of UC05 (see {@code prompts/uc-05-prompt.md}): one {@link OfferDocument} row per
- * application, generated at most once, with a PDF that actually contains the placeholder text and
- * a SHA-256 that actually matches the stored bytes.
+ * application, generated at most once, with a PDF that actually contains the pinned terms and a
+ * SHA-256 that actually matches the stored bytes.
  */
 class AgreementDocumentComposerTest {
 
     private OfferDocumentRepository offerDocuments;
     private AgreementDocumentComposer composer;
+
+    private static final AgreementDocumentComposer.Content CONTENT = new AgreementDocumentComposer.Content(
+            "Maria Nowak", "CREDIT_CARD_REWARDS", 3000, new BigDecimal("24.9"), 90, "2026-06-01");
 
     @BeforeEach
     void setUp() {
@@ -39,8 +43,8 @@ class AgreementDocumentComposerTest {
     }
 
     @Test
-    void generatesAndStoresAOnePagePdfContainingThePlaceholderText() throws IOException {
-        composer.compose("app-1234");
+    void generatesAndStoresAOnePagePdfContainingThePinnedTerms() throws IOException {
+        composer.compose("app-1234", CONTENT);
 
         ArgumentCaptor<OfferDocument> saved = ArgumentCaptor.forClass(OfferDocument.class);
         verify(offerDocuments).save(saved.capture());
@@ -53,7 +57,13 @@ class AgreementDocumentComposerTest {
 
         try (PDDocument pdf = Loader.loadPDF(document.getPdfBlob())) {
             assertThat(pdf.getNumberOfPages()).isEqualTo(1);
-            assertThat(new PDFTextStripper().getText(pdf)).contains("hello world");
+            String text = new PDFTextStripper().getText(pdf);
+            assertThat(text).contains("Maria Nowak");
+            assertThat(text).contains("CREDIT_CARD_REWARDS");
+            assertThat(text).contains("3000");
+            assertThat(text).contains("24.9");
+            assertThat(text).contains("90");
+            assertThat(text).contains("2026-06-01");
         }
     }
 
@@ -62,7 +72,7 @@ class AgreementDocumentComposerTest {
         when(offerDocuments.findByApplicationId("app-1234"))
                 .thenReturn(Optional.of(new OfferDocument("app-1234", new byte[] {1}, "abc", 1)));
 
-        composer.compose("app-1234");
+        composer.compose("app-1234", CONTENT);
 
         verify(offerDocuments, never()).save(any());
         verify(offerDocuments, times(1)).findByApplicationId("app-1234");

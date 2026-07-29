@@ -5,8 +5,10 @@ import com.neobank.module.repository.OfferDocumentRepository;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -28,23 +30,28 @@ import org.springframework.stereotype.Service;
  * class writes — keeping generation and serving apart is what makes byte-identity provable: there
  * is no code path on the read side that could produce different bytes.</p>
  *
- * <p>Every real precondition is still skipped: there is no {@code AgreementConfig}, no
- * {@code outputs.approvedLimit}/{@code apr}, no consent gate. The PDF's body is the fixed
- * {@link #PLACEHOLDER_TEXT}, standing in for the real per-application terms the finished use case
- * computes and prints.</p>
+ * <p>Renders the real terms pinned by {@code ApplicationService} via {@code AgreementConfig} — see
+ * {@link Content} for exactly what is printed.</p>
  */
 @Service
 public class AgreementDocumentComposer {
 
     private static final Logger log = LoggerFactory.getLogger(AgreementDocumentComposer.class);
 
-    /** Stand-in for the real per-application terms — no AgreementConfig, no outputs, yet. */
-    private static final String PLACEHOLDER_TEXT = "hello world";
-
     private final OfferDocumentRepository offerDocuments;
 
     public AgreementDocumentComposer(OfferDocumentRepository offerDocuments) {
         this.offerDocuments = offerDocuments;
+    }
+
+    /** Everything the PDF's body prints — the terms {@code ApplicationService} pinned at generation. */
+    public record Content(
+            String signerName,
+            String productCode,
+            Integer approvedLimit,
+            BigDecimal apr,
+            Integer minPaymentGbp,
+            String termsVersion) {
     }
 
     /**
@@ -55,29 +62,42 @@ public class AgreementDocumentComposer {
      * return the ALREADY-stored fingerprint — {@link #sha256Hex} is computed exactly once per
      * application and never overwritten.</p>
      */
-    public String compose(String applicationId) {
+    public String compose(String applicationId, Content content) {
         var existing = offerDocuments.findByApplicationId(applicationId);
         if (existing.isPresent()) {
             log.info("offer document already generated for {} — skipping", applicationId);
             return existing.get().getSha256();
         }
-        byte[] pdf = renderPlaceholderPdf();
+        byte[] pdf = renderPdf(applicationId, content);
         String sha256 = sha256Hex(pdf);
         offerDocuments.save(new OfferDocument(applicationId, pdf, sha256, pdf.length));
         return sha256;
     }
 
-    /** Renders a one-page PDF whose whole body is {@link #PLACEHOLDER_TEXT}. */
-    private byte[] renderPlaceholderPdf() {
+    /** Renders a one-page PDF stating the case reference and the pinned terms. */
+    private byte[] renderPdf(String applicationId, Content content) {
+        List<String> lines = List.of(
+                "Credit Agreement — " + applicationId,
+                "Applicant: " + orDash(content.signerName()),
+                "Product: " + orDash(content.productCode()),
+                "Approved credit limit: £" + orDash(content.approvedLimit()),
+                "APR: " + orDash(content.apr()) + "%",
+                "Minimum monthly payment: £" + orDash(content.minPaymentGbp()),
+                "Terms version: " + orDash(content.termsVersion()));
         try (PDDocument document = new PDDocument()) {
             PDPage page = new PDPage();
             document.addPage(page);
-            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
-                content.beginText();
-                content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 24);
-                content.newLineAtOffset(72, page.getMediaBox().getHeight() - 120);
-                content.showText(PLACEHOLDER_TEXT);
-                content.endText();
+            try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+                float y = page.getMediaBox().getHeight() - 100;
+                stream.beginText();
+                stream.setFont(font, 16);
+                stream.newLineAtOffset(72, y);
+                for (String line : lines) {
+                    stream.showText(line);
+                    stream.newLineAtOffset(0, -24);
+                }
+                stream.endText();
             }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             document.save(out);
@@ -85,6 +105,10 @@ public class AgreementDocumentComposer {
         } catch (IOException e) {
             throw new UncheckedIOException("failed to render agreement PDF", e);
         }
+    }
+
+    private static String orDash(Object value) {
+        return value == null ? "—" : value.toString();
     }
 
     private static String sha256Hex(byte[] bytes) {

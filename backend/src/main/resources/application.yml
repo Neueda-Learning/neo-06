@@ -79,6 +79,13 @@ service:
 cors:
   allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 
+# UC 04's expiry clock (ExpiryClockService) — how often it sweeps for PENDING cases whose
+# expiresAt has passed. Short by default so the demo doesn't need to wait real days for a case
+# to actually expire; override in prod if a longer sweep interval is preferred.
+agreement:
+  expiry-clock:
+    fixed-delay-ms: ${AGREEMENT_EXPIRY_CLOCK_FIXED_DELAY_MS:30000}
+
 management:
   endpoints:
     web:

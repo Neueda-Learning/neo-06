@@ -1,0 +1,67 @@
+# AgreementConfig — insert-only, versioned terms. Seeds version 1 so the module never runs
+# without a config to pin (see module-06-agreement-management-docs/uc-00-process-application.md).
+#
+# NEVER EDIT THIS FILE once it has run — add a new change set instead.
+databaseChangeLog:
+  - changeSet:
+      id: 007-create-agreement-config
+      author: neo-06
+      changes:
+        - createTable:
+            tableName: agreement_config
+            columns:
+              - column:
+                  name: version
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: terms_version
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: expiry_days
+                  type: INT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: min_payment_pct
+                  type: DECIMAL(5,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: min_payment_floor_gbp
+                  type: INT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: apr_percent
+                  type: DECIMAL(5,2)
+                  constraints:
+                    nullable: false
+        - insert:
+            tableName: agreement_config
+            columns:
+              - column:
+                  name: version
+                  valueNumeric: 1
+              - column:
+                  name: terms_version
+                  value: "2026-06-01"
+              - column:
+                  name: expiry_days
+                  valueNumeric: 5
+              - column:
+                  name: min_payment_pct
+                  valueNumeric: 3.00
+              - column:
+                  name: min_payment_floor_gbp
+                  valueNumeric: 5
+              - column:
+                  name: apr_percent
+                  valueNumeric: 24.9
+      rollback:
+        - dropTable:
+            tableName: agreement_config

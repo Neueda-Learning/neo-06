@@ -19,3 +19,47 @@
   gap: var(--ds-space-3);
   padding: 0 var(--ds-space-2);
 }
+
+/* The operator's name, recorded on every UC04 resend and UC08 override — lives beside the
+ * health pill rather than inside a form on every screen that needs it. */
+.app-side-operator {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  padding: 0 var(--ds-space-2);
+  font-size: var(--ds-font-size-sm, 0.8rem);
+  color: var(--ds-color-text-muted, inherit);
+}
+
+/* A case's full story, expanded in place under its row in the Agreement board: UC02's terms,
+ * UC03's applicant, UC05's document, UC04/UC08's actions, UC06's timeline. */
+.case-detail {
+  padding: var(--ds-space-4) var(--ds-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+}
+
+.case-detail__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--ds-space-6);
+}
+
+.case-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-3);
+  flex-wrap: wrap;
+}
+
+.case-detail__subhead {
+  margin: 0 0 var(--ds-space-2);
+}
+
+.case-detail__hint {
+  color: var(--ds-color-text-muted, inherit);
+  font-size: var(--ds-font-size-sm, 0.8rem);
+}
+
