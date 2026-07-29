@@ -65,7 +65,8 @@ class CasesControllerTest {
                 "env-8f14e45f", Instant.parse("2026-07-21T21:41:00Z"),
                 Instant.parse("2026-07-26T21:41:00Z"), Instant.parse("2026-07-25T10:03:00Z"),
                 List.of(new TimelineEntryView("GENERATING", "PENDING", "ENVELOPE_SENT", "system",
-                        Instant.parse("2026-07-21T21:41:00Z"))));
+                        Instant.parse("2026-07-21T21:41:00Z"))),
+                true);
         given(cases.getCase(eq("app-1234"))).willReturn(detail);
 
         mvc.perform(get("/cases/app-1234"))

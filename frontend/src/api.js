@@ -51,6 +51,7 @@ export const api = {
   getApplicant: (id) => request(`/cases/${id}/applicant`),
   // UC05 — the generated agreement PDF. A URL, not a fetch: screens open/embed it directly.
   documentUrl: (id) => `${BASE}/cases/${id}/document`,
+  documentDownloadUrl: (id) => `${BASE}/cases/${id}/document?download=true`,
   // UC04 — Pending & Expired Queue, and the one write it grants operators.
   getQueue: (state, limit = 10) => request(`/queue?state=${state}&limit=${limit}`),
   resendCase: (id, operator) =>
