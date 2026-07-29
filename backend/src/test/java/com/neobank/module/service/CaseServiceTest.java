@@ -8,8 +8,10 @@ import static org.mockito.Mockito.when;
 import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import com.neobank.module.model.AgreementStatusHistory;
+import com.neobank.module.model.OfferDocument;
 import com.neobank.module.repository.AgreementRecordRepository;
 import com.neobank.module.repository.AgreementStatusHistoryRepository;
+import com.neobank.module.repository.OfferDocumentRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -17,22 +19,26 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import static org.mockito.ArgumentMatchers.anyString;
 
 /**
- * UC02 — Review Agreement. No Spring, no database: the two repositories are mocked, so this pins
+ * UC02 — Review Agreement. No Spring, no database: the repositories are mocked, so this pins
  * exactly what the doc's acceptance criteria require without needing a running app.
  */
 class CaseServiceTest {
 
     private AgreementRecordRepository agreementRecords;
     private AgreementStatusHistoryRepository history;
+    private OfferDocumentRepository offerDocuments;
     private CaseService service;
 
     @BeforeEach
     void setUp() {
         agreementRecords = mock(AgreementRecordRepository.class);
         history = mock(AgreementStatusHistoryRepository.class);
-        service = new CaseService(agreementRecords, history);
+        offerDocuments = mock(OfferDocumentRepository.class);
+        when(offerDocuments.findByApplicationId(anyString())).thenReturn(Optional.empty());
+        service = new CaseService(agreementRecords, history, offerDocuments);
     }
 
     @Test
@@ -53,6 +59,8 @@ class CaseServiceTest {
                 "app-1234", AgreementStatus.SIGNED, "agr-000123", "env-8f14e45f", "2026-06-01",
                 2800, new BigDecimal("24.9"), 84, sentAt, sentAt.plusSeconds(5 * 24 * 3600), signedAt);
         when(agreementRecords.findById("app-1234")).thenReturn(Optional.of(maria));
+        when(offerDocuments.findByApplicationId("app-1234"))
+                .thenReturn(Optional.of(new OfferDocument("app-1234", new byte[] {1}, "sha", 1)));
 
         AgreementStatusHistory sent = new AgreementStatusHistory("app-1234",
                 AgreementStatus.GENERATING, AgreementStatus.PENDING, "ENVELOPE_SENT", "system", sentAt);
@@ -77,6 +85,7 @@ class CaseServiceTest {
         assertThat(detail.timeline().get(1).event()).isEqualTo("SIGNATURE_EVENT");
         // The last row is the terminal transition and matches signedAt (AC4).
         assertThat(detail.timeline().get(1).occurredAt()).isEqualTo(detail.signedAt());
+        assertThat(detail.documentAvailable()).isTrue();
     }
 
     @Test
@@ -97,6 +106,8 @@ class CaseServiceTest {
         assertThat(detail.sentAt()).isNull();
         assertThat(detail.timeline()).singleElement()
                 .satisfies(entry -> assertThat(entry.event()).isEqualTo("CONSENT_GATE"));
+        // A consent-gate decline never generated a document — the UI must not offer to view one.
+        assertThat(detail.documentAvailable()).isFalse();
     }
 
     @Test

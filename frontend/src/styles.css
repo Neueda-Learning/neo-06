@@ -63,3 +63,112 @@
   font-size: var(--ds-font-size-sm, 0.8rem);
 }
 
+/* UC05's document, previewed on-screen from the same terms/applicant data CaseDetail already
+ * fetched — a letterhead mock of the stored PDF's layout, not a second source of truth for it. */
+.agreement-preview {
+  max-width: 640px;
+  border: 1px solid var(--ds-color-border, #d7dbe0);
+  border-radius: var(--ds-radius-md, 8px);
+  overflow: hidden;
+  background: var(--ds-color-surface, #fff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.agreement-preview__band {
+  background: #0b2d4a;
+  color: #fff;
+  padding: var(--ds-space-4) var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agreement-preview__brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+}
+
+.agreement-preview__title {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.agreement-preview__body {
+  padding: var(--ds-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+.agreement-preview__ref {
+  margin: 0;
+  color: var(--ds-color-text-muted, #666);
+  font-size: var(--ds-font-size-sm, 0.8rem);
+}
+
+.agreement-preview__section h5 {
+  margin: 0 0 var(--ds-space-1);
+  color: #0b2d4a;
+}
+
+.agreement-preview__section hr {
+  border: none;
+  border-top: 1px solid var(--ds-color-border, #d7dbe0);
+  margin: 0 0 var(--ds-space-2);
+}
+
+.agreement-preview__section dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: 0;
+}
+
+.agreement-preview__section dt {
+  color: var(--ds-color-text-muted, #666);
+  font-weight: 600;
+}
+
+.agreement-preview__section dd {
+  margin: 0;
+}
+
+.agreement-preview__boilerplate {
+  font-size: var(--ds-font-size-sm, 0.8rem);
+  color: var(--ds-color-text-muted, #444);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.agreement-preview__signature {
+  display: flex;
+  gap: var(--ds-space-6);
+  margin-top: var(--ds-space-3);
+}
+
+.agreement-preview__signature > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  flex: 1;
+}
+
+.agreement-preview__sig-line {
+  border-top: 1px solid var(--ds-color-border, #999);
+  height: 1px;
+  margin-top: var(--ds-space-6);
+}
+
+.agreement-preview__signature span {
+  font-size: var(--ds-font-size-sm, 0.75rem);
+  color: var(--ds-color-text-muted, #666);
+}
+
+.agreement-preview__footer {
+  margin: var(--ds-space-2) 0 0;
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--ds-color-text-muted, #888);
+}
+

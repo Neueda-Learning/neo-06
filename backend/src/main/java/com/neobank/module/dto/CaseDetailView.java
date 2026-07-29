@@ -25,9 +25,11 @@ public record CaseDetailView(
         Instant sentAt,
         Instant expiresAt,
         Instant signedAt,
-        List<TimelineEntryView> timeline) {
+        List<TimelineEntryView> timeline,
+        boolean documentAvailable) {
 
-    public static CaseDetailView of(AgreementRecord record, List<TimelineEntryView> timeline) {
+    public static CaseDetailView of(AgreementRecord record, List<TimelineEntryView> timeline,
+            boolean documentAvailable) {
         return new CaseDetailView(
                 record.getStatus().name(),
                 record.getReference(),
@@ -39,6 +41,7 @@ public record CaseDetailView(
                 record.getSentAt(),
                 record.getExpiresAt(),
                 record.getSignedAt(),
-                timeline);
+                timeline,
+                documentAvailable);
     }
 }

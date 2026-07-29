@@ -2,6 +2,7 @@ package com.neobank.module.service;
 
 import com.neobank.module.dto.OverrideRequest;
 import com.neobank.module.dto.QueueEntryView;
+import com.neobank.module.integrations.orchestrator.Application;
 import com.neobank.module.integrations.orchestrator.OrchestratorClient;
 import com.neobank.module.model.AgreementConfig;
 import com.neobank.module.model.AgreementRecord;
@@ -50,6 +51,7 @@ public class OverrideService {
     private final ApplicantService applicants;
     private final EsignProvider esignProvider;
     private final OrchestratorClient orchestrator;
+    private final AgreementDocumentComposer documents;
 
     public OverrideService(AgreementRecordRepository agreementRecords,
                            AgreementConfigRepository agreementConfigs,
@@ -58,7 +60,8 @@ public class OverrideService {
                            OfferDocumentRepository offerDocuments,
                            ApplicantService applicants,
                            EsignProvider esignProvider,
-                           OrchestratorClient orchestrator) {
+                           OrchestratorClient orchestrator,
+                           AgreementDocumentComposer documents) {
         this.agreementRecords = agreementRecords;
         this.agreementConfigs = agreementConfigs;
         this.history = history;
@@ -67,6 +70,7 @@ public class OverrideService {
         this.applicants = applicants;
         this.esignProvider = esignProvider;
         this.orchestrator = orchestrator;
+        this.documents = documents;
     }
 
     @Transactional
@@ -87,11 +91,16 @@ public class OverrideService {
 
         Instant now = Instant.now();
         if (newStatus == AgreementStatus.PENDING) {
-            // Revive: same mechanics as a resend (AC6) — fresh envelope, fresh clock.
-            EnvelopeRegistration registration = esignProvider.registerEnvelope(applicationId,
-                    documentShaFor(applicationId), signerNameFor(applicationId));
             AgreementConfig config = agreementConfigs.findTopByOrderByVersionDesc()
                     .orElseThrow(() -> new IllegalStateException("no AgreementConfig seeded"));
+            // Revive: same mechanics as a resend (AC6) — fresh envelope, fresh clock. A
+            // consent-gate DECLINED case never had terms pinned or a document generated at all
+            // (UC00's decide() bails out before either step) — reviving it is the first time this
+            // case gets one. AC7 still holds for every other case: an existing document is never
+            // touched.
+            ensureDocumentGenerated(applicationId, record, config);
+            EnvelopeRegistration registration = esignProvider.registerEnvelope(applicationId,
+                    documentShaFor(applicationId), signerNameFor(applicationId));
             Instant expiresAt = now.plusSeconds((long) config.getExpiryDays() * 24 * 3600);
             record.markSentForSignature(registration.envelopeId(), now, expiresAt);
         } else {
@@ -144,6 +153,55 @@ public class OverrideService {
         return offerDocuments.findByApplicationId(applicationId)
                 .map(doc -> doc.getSha256())
                 .orElse(null);
+    }
+
+    /**
+     * Fills the gap left by a consent-gate DECLINED case: {@code decide()} bails out before
+     * pinning terms or generating a document at all, so a plain revive would otherwise send a
+     * case out for signature with nothing to sign. A document that already exists (any other
+     * DECLINED case — one that was PENDING/EXPIRED before an operator declined it) is never
+     * touched, preserving AC7's byte-identity guarantee.
+     *
+     * <p>The application's payload itself is never stored (platform rule) — this re-fetches it
+     * from the orchestrator, exactly as {@code ApplicationService.decide()} would have priced it
+     * the first time.</p>
+     */
+    private void ensureDocumentGenerated(String applicationId, AgreementRecord record,
+            AgreementConfig config) {
+        if (offerDocuments.findByApplicationId(applicationId).isPresent()) {
+            return;
+        }
+        Application application;
+        try {
+            application = orchestrator.getApplication(applicationId);
+        } catch (RuntimeException unreachable) {
+            log.warn("could not fetch application {} while reviving — no document generated: {}",
+                    applicationId, unreachable.getMessage());
+            return;
+        }
+        if (application == null) {
+            return;
+        }
+        Application.Product product = application.product();
+        Application.Applicant applicant = application.applicant();
+        Integer approvedLimit = product == null ? null : product.requestedCreditLimit();
+        Integer minPaymentGbp = approvedLimit == null ? null : config.minPaymentFor(approvedLimit);
+
+        if (record.getReference() == null) {
+            record.pinTerms(referenceFor(applicationId), config.getTermsVersion(), approvedLimit,
+                    config.getAprPercent(), minPaymentGbp);
+        }
+        documents.compose(applicationId, new AgreementDocumentComposer.Content(
+                applicant == null ? null : applicant.fullName(),
+                product == null ? null : product.productCode(),
+                approvedLimit, config.getAprPercent(), minPaymentGbp, config.getTermsVersion()));
+    }
+
+    /** Same deterministic formula as {@code ApplicationService.reference} — a case pinned late by
+     * a revive earns the same reference it would have gotten at generation. */
+    private static String referenceFor(String applicationId) {
+        int hash = Math.abs(applicationId.hashCode()) % 1_000_000;
+        return String.format("agr-%06d", hash);
     }
 
     private String signerNameFor(String applicationId) {

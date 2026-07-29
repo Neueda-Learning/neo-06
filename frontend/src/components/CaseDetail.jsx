@@ -15,6 +15,7 @@ import {
 } from '../design-system';
 import { api } from '../api.js';
 import { statusTone, time } from '../status.js';
+import AgreementPreview from './AgreementPreview.jsx';
 
 const OVERRIDE_TARGETS = {
   PENDING: [{ value: 'DECLINED', label: 'Decline — stop this live offer' }],
@@ -125,11 +126,24 @@ export default function CaseDetail({ applicationId, operator, onChanged }) {
           />
 
           <div className="case-detail__actions">
-            <a href={api.documentUrl(applicationId)} target="_blank" rel="noreferrer">
-              <Button variant="ghost" size="sm" type="button">
-                View agreement document
-              </Button>
-            </a>
+            {detail.documentAvailable ? (
+              <>
+                <a href={api.documentUrl(applicationId)} target="_blank" rel="noreferrer">
+                  <Button variant="ghost" size="sm" type="button">
+                    View agreement document
+                  </Button>
+                </a>
+                <a href={api.documentDownloadUrl(applicationId)}>
+                  <Button variant="ghost" size="sm" type="button">
+                    Download PDF
+                  </Button>
+                </a>
+              </>
+            ) : (
+              <span className="case-detail__hint">
+                No agreement document has been generated for this case yet.
+              </span>
+            )}
             {resendable && (
               <Button size="sm" onClick={resend} disabled={busy || !operator}>
                 Resend
@@ -172,6 +186,13 @@ export default function CaseDetail({ applicationId, operator, onChanged }) {
           )}
         </div>
       </div>
+
+      {detail.documentAvailable && (
+        <>
+          <h4 className="case-detail__subhead">Agreement document</h4>
+          <AgreementPreview detail={detail} applicant={applicant} />
+        </>
+      )}
 
       <h4 className="case-detail__subhead">Timeline</h4>
       <Timeline
