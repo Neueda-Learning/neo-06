@@ -1,6 +1,7 @@
 package com.neobank.module.controller;
 
 import com.neobank.module.service.AgreementDocumentNotGeneratedException;
+import com.neobank.module.service.OverrideNotAllowedException;
 import com.neobank.module.service.SignatureEventConflictException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -80,6 +81,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AgreementDocumentNotGeneratedException.class)
     public ResponseEntity<Map<String, Object>> handleDocumentNotGenerated(
             AgreementDocumentNotGeneratedException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * UC 08's {@code 409}: the case is {@code SIGNED} and cannot be overridden —
+     * a signed contract is a fact that cannot be undone (AC 3).
+     */
+    @ExceptionHandler(OverrideNotAllowedException.class)
+    public ResponseEntity<Map<String, Object>> handleOverrideNotAllowed(OverrideNotAllowedException ex) {
         return error(HttpStatus.CONFLICT, ex.getMessage());
     }
 
