@@ -4,6 +4,7 @@ import com.neobank.module.model.AgreementRecord;
 import com.neobank.module.model.AgreementStatus;
 import java.util.Collection;
 import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -56,4 +57,8 @@ public interface AgreementRecordRepository extends JpaRepository<AgreementRecord
     List<AgreementRecord> searchByApplicationIds(@Param("ids") Collection<String> ids,
                                                   @Param("status") AgreementStatus status,
                                                   Pageable pageable);
+    /* UC 04's queue: only the given status, oldest {@code sentAt} first, capped by
+     * {@code pageable}'s page size — see {@code QueueService}.
+     */
+    List<AgreementRecord> findByStatusOrderBySentAtAsc(AgreementStatus status, Pageable pageable);
 }

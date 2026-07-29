@@ -1,5 +1,6 @@
 package com.neobank.module.controller;
 
+import com.neobank.module.dto.ApplicantView;
 import com.neobank.module.dto.CaseDetailView;
 import com.neobank.module.dto.OverrideCommand;
 import com.neobank.module.service.CaseService;
@@ -17,6 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>UC08 — Override Case: {@code POST /cases/{applicationId}/override}. The ONE permitted
  * mutation outside the lifecycle — see
  * {@code module-06-agreement-management-docs/uc-08-override-case.md}.</p>
+ *
+ * <p>UC03 — View Applicant: {@code GET /cases/{applicationId}/applicant}, the platform-wide proxy
+ * every module ships — see
+ * {@code module-06-agreement-management-docs/uc-03-view-applicant.md}. Always {@code 200}, even
+ * when the orchestrator is unreachable (AC4) — never a {@code 404}/{@code 500} for this path.</p>
  */
 @RestController
 @RequestMapping("/cases")
@@ -43,5 +49,10 @@ public class CasesController {
     public CaseDetailView override(@PathVariable String applicationId,
                                    @RequestBody OverrideCommand cmd) {
         return cases.override(applicationId, cmd);
+    }
+
+    @GetMapping("/{applicationId}/applicant")
+    public ApplicantView getApplicant(@PathVariable String applicationId) {
+        return cases.getApplicant(applicationId);
     }
 }

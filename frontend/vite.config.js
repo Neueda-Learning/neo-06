@@ -22,6 +22,9 @@ export default defineConfig({
       '/api': { target: BACKEND, changeOrigin: true },
       '/health': { target: BACKEND, changeOrigin: true },
       '/info': { target: BACKEND, changeOrigin: true },
+      // This module's own read surface: GET /cases/{id} (UC02), GET /cases/{id}/applicant
+      // (UC03) — same-origin here too, so `npm run dev` behaves like the built nginx image.
+      '/cases': { target: BACKEND, changeOrigin: true },
     },
   },
 });

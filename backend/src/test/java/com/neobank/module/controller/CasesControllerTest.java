@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.neobank.module.dto.ApplicantView;
 import com.neobank.module.dto.CaseDetailView;
 import com.neobank.module.dto.OverrideCommand;
 import com.neobank.module.dto.TimelineEntryView;
@@ -29,6 +30,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@link GlobalExceptionHandler} turns a {@link NoSuchElementException} into (AC7).
  *
  * <p>UC08's HTTP surface: {@code POST /cases/{applicationId}/override} — the override endpoint.</p>
+ *
+ * <p>Also UC03's: {@code GET /cases/{applicationId}/applicant} — always {@code 200}, even when
+ * the service reports the orchestrator as unreachable (AC4).</p>
  */
 @WebMvcTest(CasesController.class)
 class CasesControllerTest {
@@ -114,5 +118,34 @@ class CasesControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(cmd)))
                 .andExpect(status().isNotFound());
+    }
+
+    // ========== UC 03 — View Applicant tests ==========
+
+    @Test
+    void applicantEndpointReturnsTheSidebarShape() throws Exception {
+        ApplicantView view = new ApplicantView("app-1234", "Maria Nowak", "maria.nowak@example.com",
+                "+48123456789", "CREDIT_CARD_REWARDS", true, false);
+        given(cases.getApplicant(eq("app-1234"))).willReturn(view);
+
+        mvc.perform(get("/cases/app-1234/applicant"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fullName").value("Maria Nowak"))
+                .andExpect(jsonPath("$.email").value("maria.nowak@example.com"))
+                .andExpect(jsonPath("$.productCode").value("CREDIT_CARD_REWARDS"))
+                .andExpect(jsonPath("$.termsAccepted").value(true))
+                .andExpect(jsonPath("$.retryable").value(false));
+    }
+
+    @Test
+    void applicantEndpointStaysA200WhenTheOrchestratorIsUnreachable() throws Exception {
+        // AC4: never a 404/500 on this path — CaseService already downgraded the failure.
+        given(cases.getApplicant(eq("app-1234")))
+                .willReturn(ApplicantView.retryable("app-1234"));
+
+        mvc.perform(get("/cases/app-1234/applicant"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.retryable").value(true))
+                .andExpect(jsonPath("$.fullName").value(org.hamcrest.Matchers.nullValue()));
     }
 }
