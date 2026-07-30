@@ -95,9 +95,11 @@ class ApplicationServiceTest {
         assertThat(saved.getValue().getStatus()).isEqualTo(AgreementStatus.GENERATING);
 
         // Not declined (no consents block yet), so the agreement PDF is generated, the case
-        // moves toward PENDING, and the orchestrator is told ACCEPTED.
+        // moves toward PENDING, and the orchestrator is told PENDING — the journey holds on
+        // this step until the customer signs. ACCEPTED here would advance it past us, and
+        // our real answer would then arrive at a step that is no longer ours.
         verify(agreementDocuments).compose(eq("SIM-01"), any());
-        verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.ACCEPTED), any());
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-01"), eq(Decision.PENDING), any());
     }
 
     @Test
@@ -158,7 +160,7 @@ class ApplicationServiceTest {
         // Two explicit saves: pinTerms (terms) and markSentForSignature (envelope) — see the
         // self-invocation caveat documented on ApplicationService#updateStatus.
         verify(agreementRecords, org.mockito.Mockito.times(2)).save(row);
-        verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.ACCEPTED), any());
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-04"), eq(Decision.PENDING), any());
     }
 
     @Test
@@ -181,7 +183,7 @@ class ApplicationServiceTest {
         assertThat(row.getSentAt()).isNotNull();
         // demoExpirySeconds=30 on the snapshot taken at registration → expiresAt ~30s after sentAt.
         assertThat(row.getExpiresAt()).isEqualTo(row.getSentAt().plusSeconds(30));
-        verify(orchestrator).applicationStatusUpdate(eq("SIM-08"), eq(Decision.ACCEPTED), any());
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-08"), eq(Decision.PENDING), any());
         verify(esignProvider).playAutoMode("SIM-08", registration);
     }
 
@@ -213,7 +215,7 @@ class ApplicationServiceTest {
 
         verify(agreementDocuments).compose(eq("SIM-05"), any());
         assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
-        verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.ACCEPTED), any());
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-05"), eq(Decision.PENDING), any());
     }
 
     @Test

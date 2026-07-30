@@ -20,3 +20,5 @@ databaseChangeLog:
       file: db/changelog/changes/007-create-agreement-config.yaml
   - include:
       file: db/changelog/changes/008-create-override-log.yaml
+  - include:
+      file: db/changelog/changes/009-default-esign-silent.yaml
