@@ -235,6 +235,25 @@ class ApplicationServiceTest {
     }
 
     @Test
+    void aDocumentComposerFailureStillMovesTheCaseOffGeneratingAndRefersIt() {
+        // The bug this guards: an applicant name PDFBox's Helvetica/WinAnsiEncoding cannot
+        // render (e.g. non-Latin scripts) throws out of compose() — before this fix, the row
+        // was left in GENERATING forever because only the orchestrator was told REFERRED, never
+        // the local record.
+        AgreementRecord row = new AgreementRecord("SIM-10", AgreementStatus.GENERATING);
+        when(agreementRecords.findById("SIM-10")).thenReturn(Optional.of(row));
+        when(agreementDocuments.compose(eq("SIM-10"), any()))
+                .thenThrow(new IllegalArgumentException("U+674E is not available in this font's encoding"));
+
+        service.decide(request("SIM-10", true));
+
+        assertThat(row.getStatus()).isEqualTo(AgreementStatus.PENDING);
+        verify(orchestrator).applicationStatusUpdate(eq("SIM-10"), eq(Decision.REFERRED),
+                org.mockito.ArgumentMatchers.contains("U+674E"));
+        verify(esignProvider, never()).registerEnvelope(any(), any(), any());
+    }
+
+    @Test
     void theBoardShowsWhatWasStored() {
         when(agreementRecords.findAllByOrderByCreatedAtDescApplicationIdDesc())
                 .thenReturn(List.of(new AgreementRecord("SIM-01", AgreementStatus.GENERATING)));

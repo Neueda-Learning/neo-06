@@ -178,8 +178,22 @@ public class ApplicationService {
             sendForSignature(applicationId, signerName(request), documentSha, config);
         } catch (RuntimeException e) {
             // A module that throws never reports, and the orchestrator waits out its timeout with
-            // nothing to explain it. Refer it to a human and say why.
+            // nothing to explain it. Refer it to a human and say why — and move the case OFF
+            // GENERATING, or it sits stuck there forever with no operator action available (the
+            // same reasoning as sendForSignature's own catch, just for a failure earlier in the
+            // pipeline: pinning terms or composing the document, e.g. an applicant name PDFBox's
+            // WinAnsi-encoded Helvetica cannot render).
             log.error("decide failed for {} — referring", applicationId, e);
+            try {
+                updateStatus(applicationId, AgreementStatus.PENDING);
+                history.save(new AgreementStatusHistory(applicationId, AgreementStatus.GENERATING,
+                        AgreementStatus.PENDING, "AGR_GENERATION_FAILED", "system", Instant.now()));
+            } catch (RuntimeException alsoFailed) {
+                // The original failure was the repository itself (e.g. the SIM-06 "database on
+                // fire" case) — nothing to persist to, but the orchestrator still must not be
+                // left to time out.
+                log.error("also failed to move {} off GENERATING", applicationId, alsoFailed);
+            }
             orchestrator.applicationStatusUpdate(applicationId, Decision.REFERRED,
                     "module error: " + e);
         }
