@@ -42,7 +42,15 @@ public class AgreementDocumentComposer {
 
     private static final Logger log = LoggerFactory.getLogger(AgreementDocumentComposer.class);
 
-    private static final Color BRAND_COLOR = new Color(11, 45, 74);
+    // The platform's "Minted Geometry" language — struck gold on absolute dark, hard edges. Values
+    // are the --neo-ink / --neo-gold tokens from neo-00's design system, so the letterhead matches
+    // the screens the customer just came from.
+    //
+    // Gold is a HEADER-ONLY colour and never body text: #ffc53d on white measures about 1.7:1,
+    // which is unreadable. On the ink band it is 11.6:1. Headings therefore use ink, not gold.
+    private static final Color HEADER_BG = new Color(15, 17, 21);      // --neo-ink   #0f1115
+    private static final Color HEADER_ACCENT = new Color(255, 197, 61); // --neo-gold  #ffc53d
+    private static final Color BRAND_COLOR = HEADER_BG;
     private static final Color RULE_COLOR = new Color(200, 203, 208);
     private static final Color MUTED_TEXT = new Color(95, 100, 110);
     private static final Color BODY_TEXT = new Color(30, 32, 36);
@@ -102,12 +110,18 @@ public class AgreementDocumentComposer {
             float contentRight = pageWidth - MARGIN;
 
             try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
-                // Letterhead band.
+                // Letterhead band. Only the band is painted — the rest of the page is left
+                // unfilled, so the body stays the paper's own white.
                 float bandHeight = 78f;
-                stream.setNonStrokingColor(BRAND_COLOR);
+                stream.setNonStrokingColor(HEADER_BG);
                 stream.addRect(0, pageHeight - bandHeight, pageWidth, bandHeight);
                 stream.fill();
-                drawText(stream, bold, 20, MARGIN, pageHeight - 34, "NEO BANK", Color.WHITE);
+                // A struck-gold keyline closing the band: the one hard edge that makes this read
+                // as the platform's letterhead rather than a dark rectangle.
+                stream.setNonStrokingColor(HEADER_ACCENT);
+                stream.addRect(0, pageHeight - bandHeight, pageWidth, 3f);
+                stream.fill();
+                drawText(stream, bold, 20, MARGIN, pageHeight - 34, "NEO BANK", HEADER_ACCENT);
                 drawText(stream, regular, 12, MARGIN, pageHeight - 54, "Credit Agreement", Color.WHITE);
 
                 float y = pageHeight - bandHeight - 30;
